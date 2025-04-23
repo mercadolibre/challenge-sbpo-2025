@@ -8,13 +8,15 @@ import com.google.ortools.sat.IntVar;
 import com.google.ortools.sat.LinearExpr;
 import com.google.ortools.sat.LinearExprBuilder;
 import org.apache.commons.lang3.time.StopWatch;
+import org.sbpo2025.challenge.geneticAlgorithm.GeneticAlgorithm;
+import org.sbpo2025.challenge.ChallengeConfig;
 
 import java.util.*;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 public class ChallengeSolver {
-    private final long MAX_RUNTIME = 600000; // milliseconds; 10 minutes
+    private final long MAX_RUNTIME = ChallengeConfig.MAX_RUNTIME_MILLIS; // milliseconds; 10 minutes
 
     protected List<Map<Integer, Integer>> orders;
     protected List<Map<Integer, Integer>> aisles;
@@ -33,26 +35,119 @@ public class ChallengeSolver {
 
     public ChallengeSolution solve(StopWatch stopWatch) {
         // 1. Primeiro obtém uma solução inicial viável usando CP-SAT
-        double initialTimeLimit = 60.0; // limite de 10 segundos para a solução inicial
+        double initialTimeLimit = ChallengeConfig.INITIAL_CP_SAT_TIME_LIMIT_SECONDS; // limite de tempo para a solução inicial
         ChallengeSolution initialSolution = solveWithCpSat(initialTimeLimit);
 
-        // Se encontrou uma solução viável, retorna
+        // Se encontrou uma solução viável
         if (initialSolution != null) {
             System.out.println("Solução inicial viável encontrada com CP-SAT!");
             System.out.println("Pedidos selecionados: " + initialSolution.orders().size());
             System.out.println("Corredores utilizados: " + initialSolution.aisles().size());
             System.out.println("Função objetivo: " + computeObjectiveFunction(initialSolution));
+
+            // 2. Aplicar Algoritmo Genético para refinar a solução
+            System.out.println("Aplicando Algoritmo Genético para refinamento da solução...");
+
+            // Calcula tempo disponível para GA após CP-SAT
+            long elapsedTime = stopWatch.getTime(TimeUnit.MILLISECONDS);
+            long remainingTime = Math.max(0, MAX_RUNTIME - elapsedTime);
+
+            // Configura e executa o algoritmo genético
+            if (remainingTime > ChallengeConfig.MIN_TIME_FOR_GA_MILLIS) { // Se restam pelo menos 10 segundos
+                // Configurações do GA otimizadas para a instância
+                GeneticAlgorithm.Builder gaBuilder = new GeneticAlgorithm.Builder(
+                    orders,
+                    aisles,
+                    nItems,
+                    waveSizeLB,
+                    waveSizeUB
+                );
+                if (orders.size() > 100 || aisles.size() > 15) {
+                    gaBuilder.populationSize(ChallengeConfig.GA_POPULATION_SIZE_LARGE)
+                            .maxGenerations(ChallengeConfig.GA_MAX_GENERATIONS_LARGE)
+                            .mutationRate(ChallengeConfig.GA_MUTATION_RATE_LARGE);
+                } else {
+                    gaBuilder.populationSize(ChallengeConfig.GA_POPULATION_SIZE_SMALL)
+                            .maxGenerations(ChallengeConfig.GA_MAX_GENERATIONS_SMALL);
+                }
+                gaBuilder.noImprovementLimit(ChallengeConfig.GA_NO_IMPROVEMENT_LIMIT)
+                        .crossoverRate(ChallengeConfig.GA_CROSSOVER_RATE)
+                        .elitismCount(ChallengeConfig.GA_ELITISM_COUNT)
+                        .maxRuntimeMillis(remainingTime);
+
+                GeneticAlgorithm geneticAlgorithm = gaBuilder.build();
+                // Inicializa com a solução do CP-SAT
+                geneticAlgorithm.initialize(initialSolution);
+
+                // Executa o algoritmo genético
+                ChallengeSolution gaSolution = geneticAlgorithm.evolve(stopWatch);
+
+                // Se encontrou uma solução viável com o GA
+                if (gaSolution != null && isSolutionFeasible(gaSolution)) {
+                    double gaObjective = computeObjectiveFunction(gaSolution);
+                    double initialObjective = computeObjectiveFunction(initialSolution);
+
+                    System.out.println("Solução final do GA:");
+                    System.out.println("Pedidos selecionados: " + gaSolution.orders().size());
+                    System.out.println("Corredores utilizados: " + gaSolution.aisles().size());
+                    System.out.println("Função objetivo: " + gaObjective);
+
+                    // Compara com a solução inicial
+                    double improvement = ((gaObjective / initialObjective) - 1.0) * 100.0;
+                    System.out.println("Melhoria sobre solução inicial: " + String.format("%.2f", improvement) + "%");
+
+                    // Retorna a melhor solução
+                    return (gaObjective > initialObjective) ? gaSolution : initialSolution;
+                }
+            } else {
+                System.out.println("Tempo insuficiente para execução do GA. Usando solução do CP-SAT.");
+            }
+
             return initialSolution;
         } else {
             System.out.println("Não foi possível encontrar uma solução inicial viável com CP-SAT.");
+
+            // Tenta encontrar uma solução usando apenas o GA
+            System.out.println("Tentando encontrar solução usando apenas Algoritmo Genético...");
+
+            // Calcula tempo disponível para GA
+            long remainingTime = getRemainingTime(stopWatch) * 1000; // em milissegundos
+
+            if (remainingTime > ChallengeConfig.MIN_TIME_FOR_GA_MILLIS) { // Se restam pelo menos 10 segundos
+                // Configurações do GA para busca sem solução inicial
+                GeneticAlgorithm.Builder gaBuilder = new GeneticAlgorithm.Builder(
+                    orders,
+                    aisles,
+                    nItems,
+                    waveSizeLB,
+                    waveSizeUB
+                );
+                gaBuilder.populationSize(ChallengeConfig.GA_POPULATION_SIZE_LARGE)
+                        .maxGenerations(ChallengeConfig.GA_MAX_GENERATIONS_NO_INIT)
+                        .noImprovementLimit(ChallengeConfig.GA_NO_IMPROVEMENT_LIMIT_NO_INIT)
+                        .crossoverRate(ChallengeConfig.GA_CROSSOVER_RATE_NO_INIT)
+                        .mutationRate(ChallengeConfig.GA_MUTATION_RATE_NO_INIT)
+                        .elitismCount(ChallengeConfig.GA_ELITISM_COUNT_NO_INIT)
+                        .maxRuntimeMillis(remainingTime);
+                GeneticAlgorithm geneticAlgorithm = gaBuilder.build();
+
+                // Inicializa sem solução prévia
+                geneticAlgorithm.initialize(null);
+
+                // Executa o algoritmo genético
+                ChallengeSolution gaSolution = geneticAlgorithm.evolve(stopWatch);
+
+                if (gaSolution != null && isSolutionFeasible(gaSolution)) {
+                    System.out.println("Solução viável encontrada com GA:");
+                    System.out.println("Pedidos selecionados: " + gaSolution.orders().size());
+                    System.out.println("Corredores utilizados: " + gaSolution.aisles().size());
+                    System.out.println("Função objetivo: " + computeObjectiveFunction(gaSolution));
+                    return gaSolution;
+                }
+            }
+
             return null;
         }
-
-        // Aqui você poderia adicionar métodos de refinamento adicionais como:
-        // - Simulated Annealing (SA)
-        // - Algoritmo Genético (GA)
-        // - Busca Local Focada
-        // para melhorar a solução inicial
     }
 
     /*

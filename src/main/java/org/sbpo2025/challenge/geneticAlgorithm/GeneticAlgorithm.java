@@ -2,6 +2,18 @@ package org.sbpo2025.challenge.geneticAlgorithm;
 
 import org.apache.commons.lang3.time.StopWatch;
 import org.sbpo2025.challenge.ChallengeSolution;
+import org.sbpo2025.challenge.geneticAlgorithm.mutation.MutationOperator;
+import org.sbpo2025.challenge.geneticAlgorithm.mutation.BitFlipMutationOperator;
+import org.sbpo2025.challenge.geneticAlgorithm.crossover.CrossoverOperator;
+import org.sbpo2025.challenge.geneticAlgorithm.crossover.OnePointCrossoverOperator;
+import org.sbpo2025.challenge.geneticAlgorithm.crossover.ProbabilisticCrossoverOperator;
+import org.sbpo2025.challenge.geneticAlgorithm.crossover.TwoPointCrossoverOperator;
+import org.sbpo2025.challenge.geneticAlgorithm.crossover.UniformCrossoverOperator;
+import org.sbpo2025.challenge.geneticAlgorithm.crossover.HUXCrossoverOperator;
+import org.sbpo2025.challenge.geneticAlgorithm.crossover.SegmentCrossoverOperator;
+import org.sbpo2025.challenge.geneticAlgorithm.crossover.ShuffleExchangeCrossoverOperator;
+import org.sbpo2025.challenge.geneticAlgorithm.crossover.SetBasedCrossoverOperator;
+import org.sbpo2025.challenge.geneticAlgorithm.crossover.GreedyHeuristicCrossoverOperator;
 
 import java.util.*;
 import java.util.concurrent.TimeUnit;
@@ -32,6 +44,9 @@ public class GeneticAlgorithm {
     private Individual bestIndividual;
     private int generationsWithoutImprovement;
     private double bestFitness;
+
+    private MutationOperator mutationOperator;
+    private CrossoverOperator crossoverOperator;
 
     /**
      * Construtor do algoritmo genético
@@ -81,6 +96,168 @@ public class GeneticAlgorithm {
         this.bestIndividual = null;
         this.generationsWithoutImprovement = 0;
         this.bestFitness = 0.0;
+        this.mutationOperator = new BitFlipMutationOperator(this.random);
+        this.crossoverOperator = new ProbabilisticCrossoverOperator(
+            new CrossoverOperator[] {
+                new OnePointCrossoverOperator(this.random),
+                new TwoPointCrossoverOperator(this.random),
+                new UniformCrossoverOperator(this.random),
+                new HUXCrossoverOperator(this.random),
+                new SegmentCrossoverOperator(this.random, 5), // Exemplo: segmento de tamanho 5
+                new ShuffleExchangeCrossoverOperator(this.random),
+                new SetBasedCrossoverOperator(this.random, waveSizeLB, waveSizeUB, orders, aisles),
+                new GreedyHeuristicCrossoverOperator(this.random, waveSizeLB, waveSizeUB, orders, aisles)
+            },
+            new double[] {0.13, 0.13, 0.13, 0.13, 0.12, 0.12, 0.12, 0.12}, // Ajuste as probabilidades conforme desejado
+            this.random
+        );
+    }
+
+    public GeneticAlgorithm(
+            List<Map<Integer, Integer>> orders,
+            List<Map<Integer, Integer>> aisles,
+            int numItems,
+            int waveSizeLB,
+            int waveSizeUB,
+            int populationSize,
+            int maxGenerations,
+            int noImprovementLimit,
+            double crossoverRate,
+            double mutationRate,
+            int elitismCount,
+            long maxRuntimeMillis,
+            MutationOperator mutationOperator,
+            CrossoverOperator crossoverOperator) {
+
+        this.orders = orders;
+        this.aisles = aisles;
+        this.numItems = numItems;
+        this.waveSizeLB = waveSizeLB;
+        this.waveSizeUB = waveSizeUB;
+
+        this.populationSize = populationSize;
+        this.maxGenerations = maxGenerations;
+        this.noImprovementLimit = noImprovementLimit;
+        this.crossoverRate = crossoverRate;
+        this.mutationRate = mutationRate;
+        this.elitismCount = elitismCount;
+        this.maxRuntimeMillis = maxRuntimeMillis;
+
+        this.random = new Random();
+        this.population = new ArrayList<>();
+        this.bestIndividual = null;
+        this.generationsWithoutImprovement = 0;
+        this.bestFitness = 0.0;
+        this.mutationOperator = mutationOperator;
+        this.crossoverOperator = crossoverOperator;
+    }
+
+    // Novo construtor privado para uso do builder
+    private GeneticAlgorithm(Builder builder) {
+        this.orders = builder.orders;
+        this.aisles = builder.aisles;
+        this.numItems = builder.numItems;
+        this.waveSizeLB = builder.waveSizeLB;
+        this.waveSizeUB = builder.waveSizeUB;
+        this.populationSize = builder.populationSize;
+        this.maxGenerations = builder.maxGenerations;
+        this.noImprovementLimit = builder.noImprovementLimit;
+        this.crossoverRate = builder.crossoverRate;
+        this.mutationRate = builder.mutationRate;
+        this.elitismCount = builder.elitismCount;
+        this.maxRuntimeMillis = builder.maxRuntimeMillis;
+        this.random = new Random();
+        this.population = new ArrayList<>();
+        this.bestIndividual = null;
+        this.generationsWithoutImprovement = 0;
+        this.bestFitness = 0.0;
+        this.mutationOperator = builder.mutationOperator != null ? builder.mutationOperator : new BitFlipMutationOperator(this.random);
+        this.crossoverOperator = builder.crossoverOperator != null ? builder.crossoverOperator : new ProbabilisticCrossoverOperator(
+            new CrossoverOperator[] {
+                new OnePointCrossoverOperator(this.random),
+                new TwoPointCrossoverOperator(this.random),
+                new UniformCrossoverOperator(this.random),
+                new HUXCrossoverOperator(this.random),
+                new SegmentCrossoverOperator(this.random, 5),
+                new ShuffleExchangeCrossoverOperator(this.random),
+                new SetBasedCrossoverOperator(this.random, waveSizeLB, waveSizeUB, orders, aisles),
+                new GreedyHeuristicCrossoverOperator(this.random, waveSizeLB, waveSizeUB, orders, aisles)
+            },
+            new double[] {0.13, 0.13, 0.13, 0.13, 0.12, 0.12, 0.12, 0.12},
+            this.random
+        );
+    }
+
+    /**
+     * Builder Pattern para configuração fluente e imutável do GeneticAlgorithm
+     */
+    public static class Builder {
+        // Parâmetros obrigatórios
+        private final List<Map<Integer, Integer>> orders;
+        private final List<Map<Integer, Integer>> aisles;
+        private final int numItems;
+        private final int waveSizeLB;
+        private final int waveSizeUB;
+
+        // Parâmetros opcionais com valores padrão
+        private int populationSize = 100;
+        private int maxGenerations = 1000;
+        private int noImprovementLimit = 50;
+        private double crossoverRate = 0.8;
+        private double mutationRate = 0.05;
+        private int elitismCount = 10;
+        private long maxRuntimeMillis = 60000;
+        private MutationOperator mutationOperator = null;
+        private CrossoverOperator crossoverOperator = null;
+
+        public Builder(List<Map<Integer, Integer>> orders, List<Map<Integer, Integer>> aisles, int numItems, int waveSizeLB, int waveSizeUB) {
+            this.orders = orders;
+            this.aisles = aisles;
+            this.numItems = numItems;
+            this.waveSizeLB = waveSizeLB;
+            this.waveSizeUB = waveSizeUB;
+        }
+
+        public Builder populationSize(int populationSize) {
+            this.populationSize = populationSize;
+            return this;
+        }
+        public Builder maxGenerations(int maxGenerations) {
+            this.maxGenerations = maxGenerations;
+            return this;
+        }
+        public Builder noImprovementLimit(int noImprovementLimit) {
+            this.noImprovementLimit = noImprovementLimit;
+            return this;
+        }
+        public Builder crossoverRate(double crossoverRate) {
+            this.crossoverRate = crossoverRate;
+            return this;
+        }
+        public Builder mutationRate(double mutationRate) {
+            this.mutationRate = mutationRate;
+            return this;
+        }
+        public Builder elitismCount(int elitismCount) {
+            this.elitismCount = elitismCount;
+            return this;
+        }
+        public Builder maxRuntimeMillis(long maxRuntimeMillis) {
+            this.maxRuntimeMillis = maxRuntimeMillis;
+            return this;
+        }
+        public Builder mutationOperator(MutationOperator mutationOperator) {
+            this.mutationOperator = mutationOperator;
+            return this;
+        }
+        public Builder crossoverOperator(CrossoverOperator crossoverOperator) {
+            this.crossoverOperator = crossoverOperator;
+            return this;
+        }
+
+        public GeneticAlgorithm build() {
+            return new GeneticAlgorithm(this);
+        }
     }
 
     /**
@@ -209,11 +386,11 @@ public class GeneticAlgorithm {
             // Aplica crossover com probabilidade crossoverRate
             if (random.nextDouble() < crossoverRate) {
                 // Gera dois filhos por crossover
-                Individual[] children = crossover(parent1, parent2);
+                Individual[] children = crossoverOperator.crossover(parent1, parent2);
 
                 // Aplica mutação em cada filho
                 for (Individual child : children) {
-                    mutate(child);
+                    mutationOperator.mutate(child, mutationRate);
                     offspring.add(child);
 
                     // Verifica se já temos filhos suficientes
@@ -226,8 +403,8 @@ public class GeneticAlgorithm {
                 Individual child1 = parent1.copy();
                 Individual child2 = parent2.copy();
 
-                mutate(child1);
-                mutate(child2);
+                mutationOperator.mutate(child1, mutationRate);
+                mutationOperator.mutate(child2, mutationRate);
 
                 offspring.add(child1);
                 if (offspring.size() < numOffspring) {
@@ -253,189 +430,68 @@ public class GeneticAlgorithm {
     }
 
     /**
-     * Realiza o crossover entre dois pais
-     * @param parent1 Primeiro pai
-     * @param parent2 Segundo pai
-     * @return Array com dois filhos resultantes do crossover
-     */
-    private Individual[] crossover(Individual parent1, Individual parent2) {
-        int numGenes = parent1.getGenes().length;
-
-        // Inicializa os genes dos filhos
-        boolean[] childGenes1 = new boolean[numGenes];
-        boolean[] childGenes2 = new boolean[numGenes];
-
-        // Seleciona aleatoriamente o tipo de crossover
-        int crossoverType = random.nextInt(3);
-
-        switch (crossoverType) {
-            case 0: // Crossover de um ponto
-                int crossoverPoint = random.nextInt(numGenes);
-
-                for (int i = 0; i < numGenes; i++) {
-                    if (i < crossoverPoint) {
-                        childGenes1[i] = parent1.getGenes()[i];
-                        childGenes2[i] = parent2.getGenes()[i];
-                    } else {
-                        childGenes1[i] = parent2.getGenes()[i];
-                        childGenes2[i] = parent1.getGenes()[i];
-                    }
-                }
-                break;
-
-            case 1: // Crossover de dois pontos
-                int point1 = random.nextInt(numGenes);
-                int point2 = random.nextInt(numGenes);
-
-                // Garante que point1 < point2
-                if (point1 > point2) {
-                    int temp = point1;
-                    point1 = point2;
-                    point2 = temp;
-                }
-
-                for (int i = 0; i < numGenes; i++) {
-                    if (i < point1 || i >= point2) {
-                        childGenes1[i] = parent1.getGenes()[i];
-                        childGenes2[i] = parent2.getGenes()[i];
-                    } else {
-                        childGenes1[i] = parent2.getGenes()[i];
-                        childGenes2[i] = parent1.getGenes()[i];
-                    }
-                }
-                break;
-
-            case 2: // Crossover uniforme
-                for (int i = 0; i < numGenes; i++) {
-                    if (random.nextBoolean()) {
-                        childGenes1[i] = parent1.getGenes()[i];
-                        childGenes2[i] = parent2.getGenes()[i];
-                    } else {
-                        childGenes1[i] = parent2.getGenes()[i];
-                        childGenes2[i] = parent1.getGenes()[i];
-                    }
-                }
-                break;
-        }
-
-        // Cria os filhos com os genes resultantes
-        Individual child1 = new Individual(childGenes1);
-        Individual child2 = new Individual(childGenes2);
-
-        return new Individual[]{child1, child2};
-    }
-
-    /**
-     * Aplica o operador de mutação em um indivíduo
-     * @param individual O indivíduo a sofrer mutação
-     */
-    private void mutate(Individual individual) {
-        boolean[] genes = individual.getGenes();
-
-        for (int i = 0; i < genes.length; i++) {
-            // Cada gene tem chance mutationRate de ser invertido
-            if (random.nextDouble() < mutationRate) {
-                individual.setGene(i, !genes[i]);
-            }
-        }
-    }
-
-    /**
      * Avalia um indivíduo calculando seu fitness e verificando sua viabilidade
      * @param individual O indivíduo a ser avaliado
      */
     private void evaluateIndividual(Individual individual) {
-        // Obtem os pedidos selecionados pelo indivíduo
         Set<Integer> selectedOrders = individual.getSelectedOrders();
-
-        // Se não há pedidos selecionados, atribui fitness zero
         if (selectedOrders.isEmpty()) {
             individual.setFitness(0.0);
             individual.setFeasible(false);
             return;
         }
-
-        // 1. Calcular total de unidades nos pedidos selecionados
-        Map<Integer, Integer> totalDemand = new HashMap<>(); // Mapa de item para quantidade total demandada
+        Map<Integer, Integer> totalDemand = new HashMap<>();
         int totalUnits = 0;
-
         for (Integer orderId : selectedOrders) {
             Map<Integer, Integer> orderItems = orders.get(orderId);
-
             for (Map.Entry<Integer, Integer> entry : orderItems.entrySet()) {
                 int itemId = entry.getKey();
                 int units = entry.getValue();
-
                 totalDemand.put(itemId, totalDemand.getOrDefault(itemId, 0) + units);
                 totalUnits += units;
             }
         }
-
-        // Armazena o total de unidades no indivíduo
         individual.setTotalUnits(totalUnits);
-
-        // 2. Verificar se o total de unidades está dentro dos limites
         boolean withinLimits = (totalUnits >= waveSizeLB && totalUnits <= waveSizeUB);
-
         if (!withinLimits) {
-            // Se estiver fora dos limites, penaliza o fitness
             individual.setFitness(0.1 * totalUnits / (Math.abs(totalUnits - waveSizeLB) + Math.abs(totalUnits - waveSizeUB) + 1));
             individual.setFeasible(false);
             return;
         }
-
-        // 3. Montar o conjunto mínimo de corredores que cubra os itens demandados (Set Cover guloso)
         Set<Integer> visitedAisles = new HashSet<>();
         Set<Integer> coveredItems = new HashSet<>();
-
-        // 3.1. Para cada item demandado, encontrar corredores que o contêm
-        Map<Integer, List<Integer>> itemToAisles = new HashMap<>(); // Mapa de item para lista de corredores que o contêm
-
+        Map<Integer, List<Integer>> itemToAisles = new HashMap<>();
         for (int i = 0; i < aisles.size(); i++) {
             Map<Integer, Integer> aisleItems = aisles.get(i);
-
             for (int itemId : aisleItems.keySet()) {
                 if (totalDemand.containsKey(itemId)) {
                     itemToAisles.computeIfAbsent(itemId, k -> new ArrayList<>()).add(i);
                 }
             }
         }
-
-        // 3.2. Aplicar o algoritmo guloso de Set Cover
         while (coveredItems.size() < totalDemand.size()) {
-            // Encontrar o corredor que cobre mais itens ainda não cobertos
             int bestAisle = -1;
             int maxNewItemsCovered = 0;
-
             for (int aisleId = 0; aisleId < aisles.size(); aisleId++) {
                 if (visitedAisles.contains(aisleId)) continue;
-
                 Map<Integer, Integer> aisleItems = aisles.get(aisleId);
                 int newItemsCovered = 0;
-
                 for (int itemId : aisleItems.keySet()) {
                     if (totalDemand.containsKey(itemId) && !coveredItems.contains(itemId)) {
                         newItemsCovered++;
                     }
                 }
-
                 if (newItemsCovered > maxNewItemsCovered) {
                     maxNewItemsCovered = newItemsCovered;
                     bestAisle = aisleId;
                 }
             }
-
-            // Se não encontrou nenhum corredor útil, significa que não é possível cobrir todos os itens
             if (bestAisle == -1 || maxNewItemsCovered == 0) {
                 individual.setFitness(0.01);
                 individual.setFeasible(false);
                 return;
             }
-
-            // Adiciona o melhor corredor à solução
             visitedAisles.add(bestAisle);
-
-            // Atualiza os itens cobertos
             Map<Integer, Integer> bestAisleItems = aisles.get(bestAisle);
             for (int itemId : bestAisleItems.keySet()) {
                 if (totalDemand.containsKey(itemId)) {
@@ -443,46 +499,34 @@ public class GeneticAlgorithm {
                 }
             }
         }
-
-        // 4. Verificar se os corredores selecionados têm capacidade suficiente para todos os itens
         boolean hasCapacity = true;
-        Map<Integer, Integer> totalSupply = new HashMap<>(); // Mapa de item para capacidade total nos corredores selecionados
-
+        Map<Integer, Integer> totalSupply = new HashMap<>();
         for (Integer aisleId : visitedAisles) {
             Map<Integer, Integer> aisleItems = aisles.get(aisleId);
-
             for (Map.Entry<Integer, Integer> entry : aisleItems.entrySet()) {
                 int itemId = entry.getKey();
                 int capacity = entry.getValue();
-
                 if (totalDemand.containsKey(itemId)) {
                     totalSupply.put(itemId, totalSupply.getOrDefault(itemId, 0) + capacity);
                 }
             }
         }
-
-        // Verificar se a oferta é suficiente para a demanda de cada item
         for (Map.Entry<Integer, Integer> entry : totalDemand.entrySet()) {
             int itemId = entry.getKey();
             int demand = entry.getValue();
             int supply = totalSupply.getOrDefault(itemId, 0);
-
             if (supply < demand) {
                 hasCapacity = false;
                 break;
             }
         }
-
         if (!hasCapacity) {
             individual.setFitness(0.05);
             individual.setFeasible(false);
             return;
         }
-
-        // 5. Solução viável: calcular o fitness
         int numAisles = visitedAisles.size();
-        double fitness = (double) totalUnits / numAisles; // Objetivo: maximizar unidades/corredores
-
+        double fitness = (double) totalUnits / numAisles;
         individual.setVisitedAisles(visitedAisles);
         individual.setFitness(fitness);
         individual.setFeasible(true);
