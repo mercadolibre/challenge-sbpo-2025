@@ -2,8 +2,10 @@ package org.sbpo2025.challenge.geneticAlgorithm;
 
 import org.apache.commons.lang3.time.StopWatch;
 import org.sbpo2025.challenge.ChallengeSolution;
-import org.sbpo2025.challenge.geneticAlgorithm.mutation.MutationOperator;
-import org.sbpo2025.challenge.geneticAlgorithm.mutation.BitFlipMutationOperator;
+import org.sbpo2025.challenge.geneticAlgorithm.mutation.binary.*;
+import org.sbpo2025.challenge.geneticAlgorithm.mutation.real.*;
+import org.sbpo2025.challenge.geneticAlgorithm.mutation.permutation.*;
+import org.sbpo2025.challenge.geneticAlgorithm.mutation.UniformMutationOperator;
 import org.sbpo2025.challenge.geneticAlgorithm.crossover.CrossoverOperator;
 import org.sbpo2025.challenge.geneticAlgorithm.crossover.OnePointCrossoverOperator;
 import org.sbpo2025.challenge.geneticAlgorithm.crossover.ProbabilisticCrossoverOperator;
@@ -14,6 +16,9 @@ import org.sbpo2025.challenge.geneticAlgorithm.crossover.SegmentCrossoverOperato
 import org.sbpo2025.challenge.geneticAlgorithm.crossover.ShuffleExchangeCrossoverOperator;
 import org.sbpo2025.challenge.geneticAlgorithm.crossover.SetBasedCrossoverOperator;
 import org.sbpo2025.challenge.geneticAlgorithm.crossover.GreedyHeuristicCrossoverOperator;
+import org.sbpo2025.challenge.geneticAlgorithm.mutation.permutation.InsertionMutationOperator;
+import org.sbpo2025.challenge.geneticAlgorithm.mutation.permutation.DisplacementMutationOperator;
+import org.sbpo2025.challenge.geneticAlgorithm.mutation.real.GaussianMutationOperator;
 
 import java.util.*;
 import java.util.concurrent.TimeUnit;
@@ -30,6 +35,14 @@ public class GeneticAlgorithm {
     private final double mutationRate;
     private final int elitismCount;
     private final long maxRuntimeMillis;
+
+    private final double mutationRateMin = 0.001; // Valor mínimo da taxa de mutação para controle determinístico
+    private final double mutationRateInicial; // Guarda o valor inicial
+    private double mutationRateAdaptativa = 0.05; // Valor inicial adaptativo
+    private final double mutationRateMax = 0.15; // Limite superior adaptativo
+    private final double improvementThresholdUp = 0.01; // Threshold para diminuir mutação
+    private final double improvementThresholdDown = 0.001; // Threshold para aumentar mutação
+    private final double mutationStep = 0.01; // Passo de ajuste
 
     // Dados do problema
     private final List<Map<Integer, Integer>> orders;
@@ -91,12 +104,37 @@ public class GeneticAlgorithm {
         this.elitismCount = elitismCount;
         this.maxRuntimeMillis = maxRuntimeMillis;
 
+        this.mutationRateInicial = mutationRate;
+
         this.random = new Random();
         this.population = new ArrayList<>();
         this.bestIndividual = null;
         this.generationsWithoutImprovement = 0;
         this.bestFitness = 0.0;
-        this.mutationOperator = new BitFlipMutationOperator(this.random);
+
+        // Exemplo de limites para UniformMutationOperator (ajuste conforme necessário)
+        double[] lowerBounds = new double[orders.size()];
+        double[] upperBounds = new double[orders.size()];
+        for (int i = 0; i < orders.size(); i++) {
+            lowerBounds[i] = 0.0;
+            upperBounds[i] = 1.0;
+        }
+        this.mutationOperator = new ProbabilisticMutationOperator(
+            new MutationOperator[] {
+                new BitFlipMutationOperator(this.random),
+                new SwapMutationOperator(this.random),
+                new ScrambleMutationOperator(this.random),
+                new InversionMutationOperator(this.random),
+                new DisplacementMutationOperator(this.random),
+                new UniformMutationOperator(this.random, lowerBounds, upperBounds),
+                new InsertionMutationOperator(this.random),
+                new org.sbpo2025.challenge.geneticAlgorithm.mutation.permutation.DisplacementMutationOperator(this.random),
+                new GaussianMutationOperator(this.random, 0.1) // sigma fictício, ajuste conforme necessário
+            },
+            new double[] {0.12, 0.12, 0.12, 0.12, 0.12, 0.12, 0.10, 0.10, 0.08},
+            this.random
+        );
+
         this.crossoverOperator = new ProbabilisticCrossoverOperator(
             new CrossoverOperator[] {
                 new OnePointCrossoverOperator(this.random),
@@ -143,6 +181,8 @@ public class GeneticAlgorithm {
         this.elitismCount = elitismCount;
         this.maxRuntimeMillis = maxRuntimeMillis;
 
+        this.mutationRateInicial = mutationRate;
+
         this.random = new Random();
         this.population = new ArrayList<>();
         this.bestIndividual = null;
@@ -171,6 +211,7 @@ public class GeneticAlgorithm {
         this.bestIndividual = null;
         this.generationsWithoutImprovement = 0;
         this.bestFitness = 0.0;
+        this.mutationRateInicial = builder.mutationRate;
         this.mutationOperator = builder.mutationOperator != null ? builder.mutationOperator : new BitFlipMutationOperator(this.random);
         this.crossoverOperator = builder.crossoverOperator != null ? builder.crossoverOperator : new ProbabilisticCrossoverOperator(
             new CrossoverOperator[] {
@@ -307,6 +348,8 @@ public class GeneticAlgorithm {
     public ChallengeSolution evolve(StopWatch stopWatch) {
         int generation = 0;
         generationsWithoutImprovement = 0;
+        double lastBestFitness = 0.0;
+        mutationRateAdaptativa = mutationRateInicial; // inicia com valor inicial
 
         System.out.println("Iniciando evolução genética...");
 
@@ -314,14 +357,22 @@ public class GeneticAlgorithm {
                generationsWithoutImprovement < noImprovementLimit &&
                (stopWatch.getTime(TimeUnit.MILLISECONDS) < maxRuntimeMillis)) {
 
-            // Evolui para a próxima geração
+            // --- Controle adaptativo: ajusta mutationRate conforme melhoria ---
+            double improvement = (bestFitness > 0) ? (bestFitness - lastBestFitness) / bestFitness : 0.0;
+            if (improvement < improvementThresholdDown) {
+                mutationRateAdaptativa = Math.min(mutationRateAdaptativa + mutationStep, mutationRateMax);
+            } else if (improvement > improvementThresholdUp) {
+                mutationRateAdaptativa = Math.max(mutationRateAdaptativa - mutationStep, mutationRateMin);
+            }
+            lastBestFitness = bestFitness;
+            // --------------------------------------------------------------
+
             List<Individual> offspring = generateOffspring();
 
-            // Avalia os descendentes
-            for (Individual child : offspring) {
+            offspring.parallelStream().forEach(child -> {
                 repairIndividual(child);
                 evaluateIndividual(child);
-            }
+            });
 
             // Combina pais e filhos
             List<Individual> combinedPopulation = new ArrayList<>(population);
@@ -368,51 +419,48 @@ public class GeneticAlgorithm {
         return bestIndividual.toSolution();
     }
 
-    /**
-     * Gera descendentes a partir da população atual
-     * @return Lista de novos indivíduos (filhos)
-     */
     private List<Individual> generateOffspring() {
         List<Individual> offspring = new ArrayList<>();
-
-        // Determina quantos filhos serão gerados
         int numOffspring = populationSize - elitismCount;
-
         while (offspring.size() < numOffspring) {
-            // Seleciona dois pais usando torneio binário
             Individual parent1 = tournamentSelection();
             Individual parent2 = tournamentSelection();
-
-            // Aplica crossover com probabilidade crossoverRate
-            if (random.nextDouble() < crossoverRate) {
-                // Gera dois filhos por crossover
+            // Média dos genes de crossover dos pais
+            double crossoverRateGene = (parent1.getCrossoverRateGene() + parent2.getCrossoverRateGene()) / 2.0;
+            if (random.nextDouble() < crossoverRateGene) {
                 Individual[] children = crossoverOperator.crossover(parent1, parent2);
-
-                // Aplica mutação em cada filho
                 for (Individual child : children) {
-                    mutationOperator.mutate(child, mutationRate);
+                    // Herdar/mutar genes de parâmetros
+                    double mutGene = (parent1.getMutationRateGene() + parent2.getMutationRateGene()) / 2.0;
+                    // Pequena mutação gaussiana
+                    mutGene += random.nextGaussian() * 0.01;
+                    child.setMutationRateGene(mutGene);
+                    double crossGene = (parent1.getCrossoverRateGene() + parent2.getCrossoverRateGene()) / 2.0;
+                    crossGene += random.nextGaussian() * 0.01;
+                    child.setCrossoverRateGene(crossGene);
+                    // Mutação usando gene do próprio filho
+                    mutationOperator.mutate(child, child.getMutationRateGene());
                     offspring.add(child);
-
-                    // Verifica se já temos filhos suficientes
-                    if (offspring.size() >= numOffspring) {
-                        break;
-                    }
+                    if (offspring.size() >= numOffspring) break;
                 }
             } else {
-                // Se não fizer crossover, copia os pais (com possível mutação)
                 Individual child1 = parent1.copy();
                 Individual child2 = parent2.copy();
-
-                mutationOperator.mutate(child1, mutationRate);
-                mutationOperator.mutate(child2, mutationRate);
-
+                // Mutação dos genes de parâmetro mesmo sem crossover
+                double mutGene1 = parent1.getMutationRateGene() + random.nextGaussian() * 0.01;
+                double crossGene1 = parent1.getCrossoverRateGene() + random.nextGaussian() * 0.01;
+                child1.setMutationRateGene(mutGene1);
+                child1.setCrossoverRateGene(crossGene1);
+                double mutGene2 = parent2.getMutationRateGene() + random.nextGaussian() * 0.01;
+                double crossGene2 = parent2.getCrossoverRateGene() + random.nextGaussian() * 0.01;
+                child2.setMutationRateGene(mutGene2);
+                child2.setCrossoverRateGene(crossGene2);
+                mutationOperator.mutate(child1, child1.getMutationRateGene());
+                mutationOperator.mutate(child2, child2.getMutationRateGene());
                 offspring.add(child1);
-                if (offspring.size() < numOffspring) {
-                    offspring.add(child2);
-                }
+                if (offspring.size() < numOffspring) offspring.add(child2);
             }
         }
-
         return offspring;
     }
 
@@ -434,30 +482,64 @@ public class GeneticAlgorithm {
      * @param individual O indivíduo a ser avaliado
      */
     private void evaluateIndividual(Individual individual) {
-        Set<Integer> selectedOrders = individual.getSelectedOrders();
-        if (selectedOrders.isEmpty()) {
-            individual.setFitness(0.0);
-            individual.setFeasible(false);
+        if (isEmptySelection(individual)) {
+            setUnfeasible(individual, 0.0);
             return;
         }
+        Map<Integer, Integer> totalDemand = calculateTotalDemand(individual);
+        int totalUnits = totalDemand.values().stream().mapToInt(Integer::intValue).sum();
+        individual.setTotalUnits(totalUnits);
+        if (!checkSizeConstraints(individual, totalUnits)) {
+            return;
+        }
+        Set<Integer> visitedAisles = findVisitedAisles(totalDemand);
+        if (visitedAisles == null) {
+            setUnfeasible(individual, 0.01);
+            return;
+        }
+        if (!checkCapacityConstraints(totalDemand, visitedAisles)) {
+            setUnfeasible(individual, 0.05);
+            return;
+        }
+        double fitness = calculateFitness(totalUnits, visitedAisles.size());
+        individual.setVisitedAisles(visitedAisles);
+        individual.setFitness(fitness);
+        individual.setFeasible(true);
+    }
+
+    private boolean isEmptySelection(Individual individual) {
+        return individual.getSelectedOrders().isEmpty();
+    }
+
+    private void setUnfeasible(Individual individual, double fitness) {
+        individual.setFitness(fitness);
+        individual.setFeasible(false);
+    }
+
+    private Map<Integer, Integer> calculateTotalDemand(Individual individual) {
         Map<Integer, Integer> totalDemand = new HashMap<>();
-        int totalUnits = 0;
-        for (Integer orderId : selectedOrders) {
+        for (Integer orderId : individual.getSelectedOrders()) {
             Map<Integer, Integer> orderItems = orders.get(orderId);
             for (Map.Entry<Integer, Integer> entry : orderItems.entrySet()) {
                 int itemId = entry.getKey();
                 int units = entry.getValue();
                 totalDemand.put(itemId, totalDemand.getOrDefault(itemId, 0) + units);
-                totalUnits += units;
             }
         }
-        individual.setTotalUnits(totalUnits);
+        return totalDemand;
+    }
+
+    private boolean checkSizeConstraints(Individual individual, int totalUnits) {
         boolean withinLimits = (totalUnits >= waveSizeLB && totalUnits <= waveSizeUB);
         if (!withinLimits) {
             individual.setFitness(0.1 * totalUnits / (Math.abs(totalUnits - waveSizeLB) + Math.abs(totalUnits - waveSizeUB) + 1));
             individual.setFeasible(false);
-            return;
+            return false;
         }
+        return true;
+    }
+
+    private Set<Integer> findVisitedAisles(Map<Integer, Integer> totalDemand) {
         Set<Integer> visitedAisles = new HashSet<>();
         Set<Integer> coveredItems = new HashSet<>();
         Map<Integer, List<Integer>> itemToAisles = new HashMap<>();
@@ -487,9 +569,7 @@ public class GeneticAlgorithm {
                 }
             }
             if (bestAisle == -1 || maxNewItemsCovered == 0) {
-                individual.setFitness(0.01);
-                individual.setFeasible(false);
-                return;
+                return null;
             }
             visitedAisles.add(bestAisle);
             Map<Integer, Integer> bestAisleItems = aisles.get(bestAisle);
@@ -499,7 +579,10 @@ public class GeneticAlgorithm {
                 }
             }
         }
-        boolean hasCapacity = true;
+        return visitedAisles;
+    }
+
+    private boolean checkCapacityConstraints(Map<Integer, Integer> totalDemand, Set<Integer> visitedAisles) {
         Map<Integer, Integer> totalSupply = new HashMap<>();
         for (Integer aisleId : visitedAisles) {
             Map<Integer, Integer> aisleItems = aisles.get(aisleId);
@@ -516,20 +599,14 @@ public class GeneticAlgorithm {
             int demand = entry.getValue();
             int supply = totalSupply.getOrDefault(itemId, 0);
             if (supply < demand) {
-                hasCapacity = false;
-                break;
+                return false;
             }
         }
-        if (!hasCapacity) {
-            individual.setFitness(0.05);
-            individual.setFeasible(false);
-            return;
-        }
-        int numAisles = visitedAisles.size();
-        double fitness = (double) totalUnits / numAisles;
-        individual.setVisitedAisles(visitedAisles);
-        individual.setFitness(fitness);
-        individual.setFeasible(true);
+        return true;
+    }
+
+    private double calculateFitness(int totalUnits, int numAisles) {
+        return (double) totalUnits / numAisles;
     }
 
     /**

@@ -14,6 +14,12 @@ public class Individual implements Comparable<Individual> {
     private double fitness; // Valor da função objetivo (unidades / corredores)
     private boolean isFeasible; // Indica se o indivíduo representa uma solução viável
     private int totalUnits; // Total de unidades coletadas nos pedidos selecionados
+    private double mutationRateGene; // Gene de auto-adaptação: taxa de mutação individual
+    private double crossoverRateGene; // Gene de auto-adaptação: taxa de crossover individual
+    private static final double MUTATION_GENE_MIN = 0.001;
+    private static final double MUTATION_GENE_MAX = 0.15;
+    private static final double CROSSOVER_GENE_MIN = 0.5;
+    private static final double CROSSOVER_GENE_MAX = 1.0;
 
     /**
      * Cria um novo indivíduo aleatório
@@ -36,6 +42,8 @@ public class Individual implements Comparable<Individual> {
         this.fitness = 0.0;
         this.isFeasible = false;
         this.totalUnits = 0;
+        this.mutationRateGene = MUTATION_GENE_MIN + (MUTATION_GENE_MAX - MUTATION_GENE_MIN) * random.nextDouble();
+        this.crossoverRateGene = CROSSOVER_GENE_MIN + (CROSSOVER_GENE_MAX - CROSSOVER_GENE_MIN) * random.nextDouble();
     }
 
     /**
@@ -58,6 +66,8 @@ public class Individual implements Comparable<Individual> {
         this.fitness = 0.0; // Será calculado durante a avaliação
         this.isFeasible = true; // Assumimos que a solução passada é viável
         this.totalUnits = 0; // Será calculado durante a avaliação
+        this.mutationRateGene = MUTATION_GENE_MIN + (MUTATION_GENE_MAX - MUTATION_GENE_MIN) * Math.random();
+        this.crossoverRateGene = CROSSOVER_GENE_MIN + (CROSSOVER_GENE_MAX - CROSSOVER_GENE_MIN) * Math.random();
     }
 
     /**
@@ -76,6 +86,8 @@ public class Individual implements Comparable<Individual> {
         this.fitness = 0.0;
         this.isFeasible = false;
         this.totalUnits = 0;
+        this.mutationRateGene = MUTATION_GENE_MIN + (MUTATION_GENE_MAX - MUTATION_GENE_MIN) * Math.random();
+        this.crossoverRateGene = CROSSOVER_GENE_MIN + (CROSSOVER_GENE_MAX - CROSSOVER_GENE_MIN) * Math.random();
     }
 
     /**
@@ -89,6 +101,8 @@ public class Individual implements Comparable<Individual> {
         this.fitness = 0.0;
         this.isFeasible = false;
         this.totalUnits = 0;
+        this.mutationRateGene = MUTATION_GENE_MIN + (MUTATION_GENE_MAX - MUTATION_GENE_MIN) * Math.random();
+        this.crossoverRateGene = CROSSOVER_GENE_MIN + (CROSSOVER_GENE_MAX - CROSSOVER_GENE_MIN) * Math.random();
     }
 
     // Getters and setters
@@ -156,6 +170,22 @@ public class Individual implements Comparable<Individual> {
         return visitedAisles.size();
     }
 
+    public double getMutationRateGene() {
+        return mutationRateGene;
+    }
+
+    public void setMutationRateGene(double value) {
+        this.mutationRateGene = Math.max(MUTATION_GENE_MIN, Math.min(MUTATION_GENE_MAX, value));
+    }
+
+    public double getCrossoverRateGene() {
+        return crossoverRateGene;
+    }
+
+    public void setCrossoverRateGene(double value) {
+        this.crossoverRateGene = Math.max(CROSSOVER_GENE_MIN, Math.min(CROSSOVER_GENE_MAX, value));
+    }
+
     /**
      * Converte o indivíduo em uma solução para o problema
      * @return Solução correspondente ao indivíduo
@@ -196,7 +226,26 @@ public class Individual implements Comparable<Individual> {
         copy.fitness = this.fitness;
         copy.isFeasible = this.isFeasible;
         copy.totalUnits = this.totalUnits;
+        copy.mutationRateGene = this.mutationRateGene;
+        copy.crossoverRateGene = this.crossoverRateGene;
         return copy;
+    }
+
+    // Métodos para suportar mutações em genes inteiros e contínuos (implementação segura)
+    public int[] getIntGenes() {
+        throw new UnsupportedOperationException("Indivíduo binário não suporta genes inteiros");
+    }
+
+    public void setIntGene(int index, int value) {
+        throw new UnsupportedOperationException("Indivíduo binário não suporta genes inteiros");
+    }
+
+    public double[] getDoubleGenes() {
+        throw new UnsupportedOperationException("Indivíduo binário não suporta genes contínuos");
+    }
+
+    public void setDoubleGene(int index, double value) {
+        throw new UnsupportedOperationException("Indivíduo binário não suporta genes contínuos");
     }
 
     @Override
