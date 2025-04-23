@@ -26,12 +26,12 @@
 <!--            <scope>compile</scope>-->
 <!--        </dependency>-->
         <!--        Uncomment the following lines to use OR-Tools:-->
-<!--        <dependency>-->
-<!--            <groupId>com.google.ortools</groupId>-->
-<!--            <artifactId>ortools-java</artifactId>-->
-<!--            <version>9.11.4210</version>-->
-<!--            <scope>compile</scope>-->
-<!--        </dependency>-->
+        <dependency>
+            <groupId>com.google.ortools</groupId>
+            <artifactId>ortools-java</artifactId>
+            <version>9.11.4210</version> <!-- Use a versão mais recente se disponível -->
+            <scope>compile</scope>
+        </dependency>
         <dependency>
             <groupId>org.apache.commons</groupId>
             <artifactId>commons-lang3</artifactId>
