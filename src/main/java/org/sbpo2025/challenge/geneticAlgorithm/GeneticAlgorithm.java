@@ -28,8 +28,7 @@ import org.sbpo2025.challenge.geneticAlgorithm.rates.RateControlStrategy;
 import org.sbpo2025.challenge.geneticAlgorithm.rates.RateControlContext;
 
 import java.util.*;
-import java.util.concurrent.*;
-import java.util.stream.IntStream;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Algoritmo Genético para resolver o problema de wave-selection do SBPO 2025.
@@ -72,10 +71,6 @@ public class GeneticAlgorithm {
     private double lastAutomatonFitness = 0.0;
 
     private RateControlStrategy rateControlStrategy;
-
-    private double temperature;
-    private final double coolingRate = 0.995;
-    private static final double HIGH_MUTATION_RATE = 0.5;
 
     private void initAutomata() {
         this.mutationRateAutomaton = new LearningAutomaton(mutationRateInicial, 0.01, 0.2);
@@ -393,66 +388,11 @@ public class GeneticAlgorithm {
         }
 
         // Completar o resto da população com indivíduos aleatórios
-        // Diversificação proposital: gerar indivíduos com perfis distintos
-        int toGen = populationSize - population.size();
-        int group = Math.max(1, toGen / 3);
-        // 1) Poucos pedidos (indivíduos leves)
-        for (int i = 0; i < group && population.size() < populationSize; i++) {
-            Individual ind = new Individual(orders.size(), random);
-            // zera genes
-            Arrays.fill(ind.getGenes(), false);
-            // adiciona poucas ordens
-            int k = 1 + random.nextInt(3);
-            for (int j = 0; j < k; j++) {
-                ind.setGene(random.nextInt(orders.size()), true);
-            }
-            repairIndividual(ind);
-            evaluateIndividual(ind);
-            population.add(ind);
-        }
-        // 2) Muitos pedidos (indivíduos pesados)
-        for (int i = 0; i < group && population.size() < populationSize; i++) {
-            Individual ind = new Individual(orders.size(), random);
-            Arrays.fill(ind.getGenes(), false);
-            int total = 0;
-            List<Integer> candidates = new ArrayList<>();
-            for (int o = 0; o < orders.size(); o++) candidates.add(o);
-            Collections.shuffle(candidates, random);
-            for (int orderId : candidates) {
-                int units = orders.get(orderId).values().stream().mapToInt(Integer::intValue).sum();
-                if (total + units <= waveSizeUB) {
-                    ind.setGene(orderId, true);
-                    total += units;
-                }
-                if (total >= waveSizeLB) break;
-            }
-            repairIndividual(ind);
-            evaluateIndividual(ind);
-            population.add(ind);
-        }
-        // 3) Foco em corredores (cada indivíduo foca em um corredor aleatório)
-        for (int i = 0; i < group && population.size() < populationSize; i++) {
-            int aisle = random.nextInt(aisles.size());
-            Individual ind = new Individual(orders.size(), random);
-            Arrays.fill(ind.getGenes(), false);
-            for (int o = 0; o < orders.size(); o++) {
-                for (Integer item : orders.get(o).keySet()) {
-                    if (aisles.get(aisle).containsKey(item)) {
-                        ind.setGene(o, true);
-                        break;
-                    }
-                }
-            }
-            repairIndividual(ind);
-            evaluateIndividual(ind);
-            population.add(ind);
-        }
-        // Preencher restantes aleatoriamente
         while (population.size() < populationSize) {
-            Individual ind = new Individual(orders.size(), random);
-            repairIndividual(ind);
-            evaluateIndividual(ind);
-            population.add(ind);
+            Individual individual = new Individual(orders.size(), random);
+            repairIndividual(individual); // Repara para garantir viabilidade
+            evaluateIndividual(individual);
+            population.add(individual);
         }
 
         // Ordena população por fitness
@@ -471,8 +411,6 @@ public class GeneticAlgorithm {
      * @return A melhor solução encontrada
      */
     public ChallengeSolution evolve(StopWatch stopWatch) {
-        // inicializa temperatura
-        this.temperature = 1.0;
         int generation = 0;
         generationsWithoutImprovement = 0;
         double lastBestFitness = 0.0;
@@ -493,49 +431,16 @@ public class GeneticAlgorithm {
             double crossoverRateFuzzy = rates[1];
             lastBestFitness = bestFitness;
 
-            // esfria temperatura
-            temperature *= coolingRate;
-
             List<Individual> offspring = generateOffspringFuzzy(crossoverRateFuzzy);
 
-            // Avaliação em paralelo usando ExecutorService para maior controle
-            ExecutorService executor = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors());
-            List<Callable<Void>> tasks = new ArrayList<>();
-            for (Individual child : offspring) {
-                tasks.add(() -> {
-                    repairIndividual(child);
-                    evaluateIndividual(child);
-                    return null;
-                });
-            }
-            try {
-                List<Future<Void>> futures = executor.invokeAll(tasks);
-                for (Future<Void> future : futures) {
-                    try {
-                        future.get();
-                    } catch (ExecutionException e) {
-                        // Tratar exceção individual de tarefa
-                        e.getCause().printStackTrace();
-                    }
-                }
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            } finally {
-                executor.shutdown();
-            }
+            offspring.parallelStream().forEach(child -> {
+                repairIndividual(child);
+                evaluateIndividual(child);
+            });
 
-            // Simulated Annealing: aceita filhos piores com probabilidade
-            List<Individual> accepted = new ArrayList<>();
-            for (Individual child : offspring) {
-                Individual worst = population.get(populationSize - 1);
-                double delta = child.getFitness() - worst.getFitness();
-                if (delta >= 0 || random.nextDouble() < Math.exp(delta / temperature)) {
-                    accepted.add(child);
-                }
-            }
-            // Combina pais e filhos aceitos
+            // Combina pais e filhos
             List<Individual> combinedPopulation = new ArrayList<>(population);
-            combinedPopulation.addAll(accepted);
+            combinedPopulation.addAll(offspring);
 
             // Ordena a população combinada por fitness
             Collections.sort(combinedPopulation);
@@ -561,21 +466,14 @@ public class GeneticAlgorithm {
                 generationsWithoutImprovement++;
             }
 
-            // Hiper-mutação em caso de estagnação
-            if (generationsWithoutImprovement >= noImprovementLimit) {
-                for (int i = elitismCount; i < populationSize; i++) {
-                    Individual ind = population.get(i);
-                    for (int g = 0; g < ind.getGenes().length; g++) {
-                        if (random.nextDouble() < HIGH_MUTATION_RATE) {
-                            // inverte estado do gene manualmente
-                            boolean current = ind.getGene(g);
-                            ind.setGene(g, !current);
-                        }
-                    }
-                    evaluateIndividual(ind);
+            // --- Restart parcial: força diversidade se estagnado ---
+            if (generationsWithoutImprovement > 0 && generationsWithoutImprovement % 20 == 0) {
+                int numRestart = (int) (populationSize * 0.3);
+                for (int i = 0; i < numRestart; i++) {
+                    int idx = elitismCount + random.nextInt(populationSize - elitismCount);
+                    population.set(idx, new Individual(numItems, random));
                 }
-                generationsWithoutImprovement = 0;
-                System.out.println("[Hiper-mutação] aplicada após estagnação de " + noImprovementLimit + " gerações.");
+                System.out.println("[Restart parcial] Diversidade forçada após " + generationsWithoutImprovement + " gerações sem melhoria.");
             }
 
             // Atualiza probabilidades dos operadores a cada PROB_UPDATE_INTERVAL gerações
@@ -601,8 +499,8 @@ public class GeneticAlgorithm {
             if (generation % 10 == 0) {
                 System.out.println("Geração " + generation +
                                    ": Melhor fitness = " + bestFitness +
-                                    ", Gerações sem melhoria: " + generationsWithoutImprovement +
-                                    ", Tempo: " + stopWatch.getTime(TimeUnit.SECONDS) + "s");
+                                   ", Gerações sem melhoria: " + generationsWithoutImprovement +
+                                   ", Tempo: " + stopWatch.getTime(TimeUnit.SECONDS) + "s");
             }
         }
 
@@ -707,14 +605,16 @@ public class GeneticAlgorithm {
     }
 
     private double calculateDiversity() {
-        int n = population.size();
-        if (n < 2) return 0.0;
-        double diversity = IntStream.range(0, n - 1)
-            .flatMap(i -> IntStream.range(i + 1, n)
-                .map(j -> hammingDistance(population.get(i), population.get(j))))
-            .average()
-            .orElse(0.0) / numItems;
-        return diversity;
+        // Diversidade: média da distância de Hamming entre todos os pares (binário)
+        double total = 0.0;
+        int count = 0;
+        for (int i = 0; i < population.size(); i++) {
+            for (int j = i + 1; j < population.size(); j++) {
+                total += hammingDistance(population.get(i), population.get(j));
+                count++;
+            }
+        }
+        return count > 0 ? total / count / numItems : 0.0;
     }
 
     private int hammingDistance(Individual a, Individual b) {
@@ -727,11 +627,16 @@ public class GeneticAlgorithm {
     }
 
     private double calculateAvgImprovement(double lastBestFitness) {
-        return population.stream()
-            .mapToDouble(ind -> ind.getFitness() - lastBestFitness)
-            .filter(imp -> imp > 0)
-            .average()
-            .orElse(0.0) / (lastBestFitness + 1e-6);
+        double sum = 0.0;
+        int count = 0;
+        for (Individual ind : population) {
+            double imp = ind.getFitness() - lastBestFitness;
+            if (imp > 0) {
+                sum += imp;
+                count++;
+            }
+        }
+        return count > 0 ? sum / count / (lastBestFitness + 1e-6) : 0.0;
     }
 
     /**
@@ -883,14 +788,15 @@ public class GeneticAlgorithm {
 
     /**
      * Repara um indivíduo para tentar torná-lo viável
-     * Estratégia sorteada a cada chamada para aumentar diversidade.
      * @param individual O indivíduo a ser reparado
      */
     private void repairIndividual(Individual individual) {
-        int strategy = random.nextInt(3); // 0: aleatória, 1: maior itens únicos, 2: menor contribuição
+        // Obtém os pedidos selecionados
         Set<Integer> selectedOrders = individual.getSelectedOrders();
+
+        // Se não há pedidos selecionados, adiciona alguns aleatoriamente
         if (selectedOrders.isEmpty()) {
-            for (int i = 0; i < 5; i++) {
+            for (int i = 0; i < 5; i++) { // Adiciona 5 pedidos aleatórios
                 int randomOrder = random.nextInt(orders.size());
                 if (randomOrder < orders.size()) {
                     individual.setGene(randomOrder, true);
@@ -898,8 +804,11 @@ public class GeneticAlgorithm {
             }
             selectedOrders = individual.getSelectedOrders();
         }
+
+        // 1. Calcular total de unidades nos pedidos selecionados
         Map<Integer, Integer> totalDemand = new HashMap<>();
         int totalUnits = 0;
+
         for (Integer orderId : selectedOrders) {
             if (orderId < orders.size()) {
                 Map<Integer, Integer> orderItems = orders.get(orderId);
@@ -911,8 +820,12 @@ public class GeneticAlgorithm {
                 }
             }
         }
+
+        // 2. Reparar se o total de unidades está fora dos limites
         List<Integer> ordersList = new ArrayList<>(selectedOrders);
-        Collections.shuffle(ordersList, random);
+        Collections.shuffle(ordersList, random); // Embaralha para aleatoriedade na reparação
+
+        // 2.1. Se estiver abaixo do limite inferior, adiciona pedidos aleatoriamente
         if (totalUnits < waveSizeLB) {
             List<Integer> candidateOrders = new ArrayList<>();
             for (int i = 0; i < orders.size(); i++) {
@@ -920,57 +833,45 @@ public class GeneticAlgorithm {
                     candidateOrders.add(i);
                 }
             }
-            // Estratégias para adicionar pedidos
-            if (strategy == 1) {
-                // Ordena por maior número de itens únicos
-                candidateOrders.sort((a, b) -> Integer.compare(
-                    orders.get(b).keySet().size(),
-                    orders.get(a).keySet().size()
-                ));
-            } else if (strategy == 2) {
-                // Ordena por maior número de unidades
-                candidateOrders.sort((a, b) -> Integer.compare(
-                    orders.get(b).values().stream().mapToInt(Integer::intValue).sum(),
-                    orders.get(a).values().stream().mapToInt(Integer::intValue).sum()
-                ));
-            } else {
-                Collections.shuffle(candidateOrders, random);
-            }
+            Collections.shuffle(candidateOrders, random);
+
             for (Integer orderId : candidateOrders) {
                 if (orderId < orders.size()) {
                     Map<Integer, Integer> orderItems = orders.get(orderId);
                     int orderUnits = orderItems.values().stream().mapToInt(Integer::intValue).sum();
+
+                    // Adiciona o pedido se não ultrapassar o limite superior
                     if (totalUnits + orderUnits <= waveSizeUB) {
                         individual.setGene(orderId, true);
                         totalUnits += orderUnits;
+
+                        // Atualiza a demanda total
                         for (Map.Entry<Integer, Integer> entry : orderItems.entrySet()) {
                             int itemId = entry.getKey();
                             int units = entry.getValue();
                             totalDemand.put(itemId, totalDemand.getOrDefault(itemId, 0) + units);
                         }
+
+                        // Se já atingiu o limite inferior, para
                         if (totalUnits >= waveSizeLB) {
                             break;
                         }
                     }
                 }
             }
-        } else if (totalUnits > waveSizeUB) {
-            // Estratégias para remover pedidos
-            if (strategy == 1) {
-                // Remove pedidos de menor número de itens únicos primeiro
-                ordersList.sort(Comparator.comparingInt(a -> orders.get(a).keySet().size()));
-            } else if (strategy == 2) {
-                // Remove pedidos de menor número de unidades primeiro
-                ordersList.sort(Comparator.comparingInt(a -> orders.get(a).values().stream().mapToInt(Integer::intValue).sum()));
-            } else {
-                Collections.shuffle(ordersList, random);
-            }
+        }
+        // 2.2. Se estiver acima do limite superior, remove pedidos aleatoriamente
+        else if (totalUnits > waveSizeUB) {
             for (Integer orderId : ordersList) {
                 if (orderId < orders.size()) {
                     Map<Integer, Integer> orderItems = orders.get(orderId);
                     int orderUnits = orderItems.values().stream().mapToInt(Integer::intValue).sum();
+
+                    // Remove o pedido
                     individual.setGene(orderId, false);
                     totalUnits -= orderUnits;
+
+                    // Atualiza a demanda total
                     for (Map.Entry<Integer, Integer> entry : orderItems.entrySet()) {
                         int itemId = entry.getKey();
                         int units = entry.getValue();
@@ -979,16 +880,16 @@ public class GeneticAlgorithm {
                             totalDemand.remove(itemId);
                         }
                     }
+
+                    // Se já está dentro do limite superior e ainda acima do inferior, para
                     if (totalUnits <= waveSizeUB && totalUnits >= waveSizeLB) {
                         break;
                     }
                 }
             }
         }
-        // Pequena mutação extra para diversidade
-        if (random.nextDouble() < 0.2) {
-            int g = random.nextInt(individual.getGenes().length);
-            individual.setGene(g, !individual.getGene(g));
-        }
+
+        // Se ainda estiver fora dos limites após a reparação, não há muito o que fazer
+        // O indivíduo será avaliado como inviável
     }
 }
