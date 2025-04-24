@@ -36,7 +36,11 @@ public class SetBasedCrossoverOperator implements CrossoverOperator {
         // Calcula sinergia de cada pedido do complemento
         Map<Integer, Integer> synergy = new HashMap<>();
         for (Integer orderId : complement) {
-            synergy.put(orderId, computeSynergy(orderId));
+            if (orderId < orders.size()) {
+                synergy.put(orderId, computeSynergy(orderId));
+            } else {
+                synergy.put(orderId, 0);
+            }
         }
         // Ordena pedidos do complemento por sinergia decrescente
         List<Integer> complementSorted = new ArrayList<>(complement);
@@ -49,16 +53,23 @@ public class SetBasedCrossoverOperator implements CrossoverOperator {
         // Complementa até LB
         while (totalUnits < waveSizeLB && idx < complementSorted.size()) {
             Integer orderId = complementSorted.get(idx++);
-            childOrders.add(orderId);
-            totalUnits = getTotalUnits(childOrders);
+            if (orderId < orders.size()) {
+                childOrders.add(orderId);
+                totalUnits = getTotalUnits(childOrders);
+            }
         }
         // Se ainda não atingiu LB, adiciona aleatórios do complemento restante
-        List<Integer> left = new ArrayList<>(complementSorted.subList(idx, complementSorted.size()));
+        List<Integer> left = new ArrayList<>();
+        if (idx < complementSorted.size()) {
+            left.addAll(complementSorted.subList(idx, complementSorted.size()));
+        }
         Collections.shuffle(left, random);
         for (Integer orderId : left) {
             if (totalUnits >= waveSizeLB) break;
-            childOrders.add(orderId);
-            totalUnits = getTotalUnits(childOrders);
+            if (orderId < orders.size()) {
+                childOrders.add(orderId);
+                totalUnits = getTotalUnits(childOrders);
+            }
         }
         // Se excedeu UB, remove pedidos de menor contribuição
         while (totalUnits > waveSizeUB && !childOrders.isEmpty()) {
@@ -76,6 +87,7 @@ public class SetBasedCrossoverOperator implements CrossoverOperator {
 
     // Sinergia: número de itens do pedido presentes em corredores já cobertos pelo núcleo
     private int computeSynergy(int orderId) {
+        if (orderId >= orders.size()) return 0;
         Set<Integer> items = orders.get(orderId).keySet();
         Set<Integer> coveredAisles = new HashSet<>();
         for (int aisleId = 0; aisleId < aisles.size(); aisleId++) {
@@ -93,8 +105,10 @@ public class SetBasedCrossoverOperator implements CrossoverOperator {
     private int getTotalUnits(Set<Integer> orderIds) {
         int sum = 0;
         for (Integer orderId : orderIds) {
-            Map<Integer, Integer> orderItems = orders.get(orderId);
-            sum += orderItems.values().stream().mapToInt(Integer::intValue).sum();
+            if (orderId < orders.size()) {
+                Map<Integer, Integer> orderItems = orders.get(orderId);
+                sum += orderItems.values().stream().mapToInt(Integer::intValue).sum();
+            }
         }
         return sum;
     }
@@ -104,11 +118,13 @@ public class SetBasedCrossoverOperator implements CrossoverOperator {
         Integer minOrder = null;
         int minUnits = Integer.MAX_VALUE;
         for (Integer orderId : orderIds) {
-            Map<Integer, Integer> orderItems = orders.get(orderId);
-            int units = orderItems.values().stream().mapToInt(Integer::intValue).sum();
-            if (units < minUnits) {
-                minUnits = units;
-                minOrder = orderId;
+            if (orderId < orders.size()) {
+                Map<Integer, Integer> orderItems = orders.get(orderId);
+                int units = orderItems.values().stream().mapToInt(Integer::intValue).sum();
+                if (units < minUnits) {
+                    minUnits = units;
+                    minOrder = orderId;
+                }
             }
         }
         return minOrder;

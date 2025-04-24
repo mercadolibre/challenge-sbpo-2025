@@ -24,7 +24,7 @@ public class SegmentCrossoverOperator implements CrossoverOperator {
     public Individual[] crossover(Individual parent1, Individual parent2) {
         boolean[] genes1 = parent1.getGenes();
         boolean[] genes2 = parent2.getGenes();
-        int numGenes = genes1.length;
+        int numGenes = Math.min(genes1.length, genes2.length);
         boolean[] child1 = new boolean[numGenes];
         boolean[] child2 = new boolean[numGenes];
 

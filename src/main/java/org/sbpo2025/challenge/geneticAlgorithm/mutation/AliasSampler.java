@@ -41,6 +41,35 @@ public class AliasSampler {
     }
 
     /**
+     * Atualiza as probabilidades do sampler (reconstrói as tabelas internas).
+     */
+    public void updateProbabilities(double[] probabilities) {
+        if (probabilities.length != n) throw new IllegalArgumentException("Tamanho incompatível");
+        double[] scaled = new double[n];
+        int[] small = new int[n];
+        int[] large = new int[n];
+        int smallCount = 0, largeCount = 0;
+        double sum = 0.0;
+        for (double p : probabilities) sum += p;
+        for (int i = 0; i < n; i++) scaled[i] = probabilities[i] * n / sum;
+        for (int i = 0; i < n; i++) {
+            if (scaled[i] < 1.0) small[smallCount++] = i;
+            else large[largeCount++] = i;
+        }
+        while (smallCount > 0 && largeCount > 0) {
+            int s = small[--smallCount];
+            int l = large[--largeCount];
+            prob[s] = scaled[s];
+            alias[s] = l;
+            scaled[l] = (scaled[l] + scaled[s]) - 1.0;
+            if (scaled[l] < 1.0) small[smallCount++] = l;
+            else large[largeCount++] = l;
+        }
+        while (largeCount > 0) prob[large[--largeCount]] = 1.0;
+        while (smallCount > 0) prob[small[--smallCount]] = 1.0;
+    }
+
+    /**
      * Retorna um índice amostrado conforme as probabilidades originais.
      */
     public int sample() {

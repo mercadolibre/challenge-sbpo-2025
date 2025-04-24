@@ -1,7 +1,7 @@
 package org.sbpo2025.challenge.geneticAlgorithm.mutation.permutation;
 
 import org.sbpo2025.challenge.geneticAlgorithm.Individual;
-import org.sbpo2025.challenge.geneticAlgorithm.mutation.real.MutationOperator;
+import org.sbpo2025.challenge.geneticAlgorithm.mutation.MutationOperator;
 
 import java.util.Random;
 

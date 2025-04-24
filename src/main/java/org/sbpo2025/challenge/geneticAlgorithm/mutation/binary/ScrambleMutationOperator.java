@@ -1,10 +1,9 @@
 package org.sbpo2025.challenge.geneticAlgorithm.mutation.binary;
 
 import org.sbpo2025.challenge.geneticAlgorithm.Individual;
-import org.sbpo2025.challenge.geneticAlgorithm.mutation.real.MutationOperator;
+import org.sbpo2025.challenge.geneticAlgorithm.mutation.MutationOperator;
 
 import java.util.Random;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.ArrayList;

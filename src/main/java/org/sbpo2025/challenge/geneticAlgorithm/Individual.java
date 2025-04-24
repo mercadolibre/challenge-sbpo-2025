@@ -122,6 +122,13 @@ public class Individual implements Comparable<Individual> {
         }
     }
 
+    /**
+     * Retorna o valor do gene em um índice específico.
+     */
+    public boolean getGene(int index) {
+        return genes[index];
+    }
+
     public Set<Integer> getSelectedOrders() {
         return selectedOrders;
     }

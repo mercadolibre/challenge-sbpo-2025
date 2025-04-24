@@ -2,13 +2,19 @@ package org.sbpo2025.challenge.geneticAlgorithm;
 
 import org.apache.commons.lang3.time.StopWatch;
 import org.sbpo2025.challenge.ChallengeSolution;
-import org.sbpo2025.challenge.geneticAlgorithm.mutation.binary.*;
-import org.sbpo2025.challenge.geneticAlgorithm.mutation.real.*;
-import org.sbpo2025.challenge.geneticAlgorithm.mutation.permutation.*;
+import org.sbpo2025.challenge.geneticAlgorithm.mutation.MutationOperator;
+import org.sbpo2025.challenge.geneticAlgorithm.mutation.ProbabilisticMutationOperator;
+import org.sbpo2025.challenge.geneticAlgorithm.mutation.binary.BitFlipMutationOperator;
+import org.sbpo2025.challenge.geneticAlgorithm.mutation.binary.SwapMutationOperator;
+import org.sbpo2025.challenge.geneticAlgorithm.mutation.binary.ScrambleMutationOperator;
+import org.sbpo2025.challenge.geneticAlgorithm.mutation.binary.InversionMutationOperator;
+import org.sbpo2025.challenge.geneticAlgorithm.mutation.permutation.DisplacementMutationOperator;
+import org.sbpo2025.challenge.geneticAlgorithm.mutation.permutation.InsertionMutationOperator;
+import org.sbpo2025.challenge.geneticAlgorithm.mutation.real.GaussianMutationOperator;
 import org.sbpo2025.challenge.geneticAlgorithm.mutation.UniformMutationOperator;
 import org.sbpo2025.challenge.geneticAlgorithm.crossover.CrossoverOperator;
-import org.sbpo2025.challenge.geneticAlgorithm.crossover.OnePointCrossoverOperator;
 import org.sbpo2025.challenge.geneticAlgorithm.crossover.ProbabilisticCrossoverOperator;
+import org.sbpo2025.challenge.geneticAlgorithm.crossover.OnePointCrossoverOperator;
 import org.sbpo2025.challenge.geneticAlgorithm.crossover.TwoPointCrossoverOperator;
 import org.sbpo2025.challenge.geneticAlgorithm.crossover.UniformCrossoverOperator;
 import org.sbpo2025.challenge.geneticAlgorithm.crossover.HUXCrossoverOperator;
@@ -16,12 +22,14 @@ import org.sbpo2025.challenge.geneticAlgorithm.crossover.SegmentCrossoverOperato
 import org.sbpo2025.challenge.geneticAlgorithm.crossover.ShuffleExchangeCrossoverOperator;
 import org.sbpo2025.challenge.geneticAlgorithm.crossover.SetBasedCrossoverOperator;
 import org.sbpo2025.challenge.geneticAlgorithm.crossover.GreedyHeuristicCrossoverOperator;
-import org.sbpo2025.challenge.geneticAlgorithm.mutation.permutation.InsertionMutationOperator;
-import org.sbpo2025.challenge.geneticAlgorithm.mutation.permutation.DisplacementMutationOperator;
-import org.sbpo2025.challenge.geneticAlgorithm.mutation.real.GaussianMutationOperator;
+import org.sbpo2025.challenge.geneticAlgorithm.fuzzy.FuzzyRateController;
+import org.sbpo2025.challenge.geneticAlgorithm.learning.LearningAutomaton;
+import org.sbpo2025.challenge.geneticAlgorithm.rates.RateControlStrategy;
+import org.sbpo2025.challenge.geneticAlgorithm.rates.RateControlContext;
 
 import java.util.*;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
+import java.util.stream.IntStream;
 
 /**
  * Algoritmo Genético para resolver o problema de wave-selection do SBPO 2025.
@@ -35,14 +43,10 @@ public class GeneticAlgorithm {
     private final double mutationRate;
     private final int elitismCount;
     private final long maxRuntimeMillis;
-
-    private final double mutationRateMin = 0.001; // Valor mínimo da taxa de mutação para controle determinístico
     private final double mutationRateInicial; // Guarda o valor inicial
     private double mutationRateAdaptativa = 0.05; // Valor inicial adaptativo
-    private final double mutationRateMax = 0.15; // Limite superior adaptativo
-    private final double improvementThresholdUp = 0.01; // Threshold para diminuir mutação
-    private final double improvementThresholdDown = 0.001; // Threshold para aumentar mutação
-    private final double mutationStep = 0.01; // Passo de ajuste
+
+    private static final int PROB_UPDATE_INTERVAL = 5; // Atualiza probabilidades a cada N gerações
 
     // Dados do problema
     private final List<Map<Integer, Integer>> orders;
@@ -60,6 +64,23 @@ public class GeneticAlgorithm {
 
     private MutationOperator mutationOperator;
     private CrossoverOperator crossoverOperator;
+
+    private FuzzyRateController fuzzyRateController = new FuzzyRateController();
+
+    private LearningAutomaton mutationRateAutomaton;
+    private LearningAutomaton crossoverRateAutomaton;
+    private double lastAutomatonFitness = 0.0;
+
+    private RateControlStrategy rateControlStrategy;
+
+    private double temperature;
+    private final double coolingRate = 0.995;
+    private static final double HIGH_MUTATION_RATE = 0.5;
+
+    private void initAutomata() {
+        this.mutationRateAutomaton = new LearningAutomaton(mutationRateInicial, 0.01, 0.2);
+        this.crossoverRateAutomaton = new LearningAutomaton(crossoverRate, 0.5, 0.99);
+    }
 
     /**
      * Construtor do algoritmo genético
@@ -105,6 +126,7 @@ public class GeneticAlgorithm {
         this.maxRuntimeMillis = maxRuntimeMillis;
 
         this.mutationRateInicial = mutationRate;
+        initAutomata();
 
         this.random = new Random();
         this.population = new ArrayList<>();
@@ -137,12 +159,12 @@ public class GeneticAlgorithm {
 
         this.crossoverOperator = new ProbabilisticCrossoverOperator(
             new CrossoverOperator[] {
-                new OnePointCrossoverOperator(this.random),
-                new TwoPointCrossoverOperator(this.random),
-                new UniformCrossoverOperator(this.random),
+                new OnePointCrossoverOperator(),
+                new TwoPointCrossoverOperator(),
+                new UniformCrossoverOperator(),
                 new HUXCrossoverOperator(this.random),
                 new SegmentCrossoverOperator(this.random, 5), // Exemplo: segmento de tamanho 5
-                new ShuffleExchangeCrossoverOperator(this.random),
+                new ShuffleExchangeCrossoverOperator(),
                 new SetBasedCrossoverOperator(this.random, waveSizeLB, waveSizeUB, orders, aisles),
                 new GreedyHeuristicCrossoverOperator(this.random, waveSizeLB, waveSizeUB, orders, aisles)
             },
@@ -182,6 +204,7 @@ public class GeneticAlgorithm {
         this.maxRuntimeMillis = maxRuntimeMillis;
 
         this.mutationRateInicial = mutationRate;
+        initAutomata();
 
         this.random = new Random();
         this.population = new ArrayList<>();
@@ -190,6 +213,46 @@ public class GeneticAlgorithm {
         this.bestFitness = 0.0;
         this.mutationOperator = mutationOperator;
         this.crossoverOperator = crossoverOperator;
+    }
+
+    public GeneticAlgorithm(
+            List<Map<Integer, Integer>> orders,
+            List<Map<Integer, Integer>> aisles,
+            int numItems,
+            int waveSizeLB,
+            int waveSizeUB,
+            int populationSize,
+            int maxGenerations,
+            int noImprovementLimit,
+            double crossoverRate,
+            double mutationRate,
+            int elitismCount,
+            long maxRuntimeMillis,
+            RateControlStrategy rateControlStrategy) {
+
+        this.orders = orders;
+        this.aisles = aisles;
+        this.numItems = numItems;
+        this.waveSizeLB = waveSizeLB;
+        this.waveSizeUB = waveSizeUB;
+
+        this.populationSize = populationSize;
+        this.maxGenerations = maxGenerations;
+        this.noImprovementLimit = noImprovementLimit;
+        this.crossoverRate = crossoverRate;
+        this.mutationRate = mutationRate;
+        this.elitismCount = elitismCount;
+        this.maxRuntimeMillis = maxRuntimeMillis;
+
+        this.mutationRateInicial = mutationRate;
+        initAutomata();
+
+        this.random = new Random();
+        this.population = new ArrayList<>();
+        this.bestIndividual = null;
+        this.generationsWithoutImprovement = 0;
+        this.bestFitness = 0.0;
+        this.rateControlStrategy = rateControlStrategy;
     }
 
     // Novo construtor privado para uso do builder
@@ -212,21 +275,23 @@ public class GeneticAlgorithm {
         this.generationsWithoutImprovement = 0;
         this.bestFitness = 0.0;
         this.mutationRateInicial = builder.mutationRate;
+        initAutomata();
         this.mutationOperator = builder.mutationOperator != null ? builder.mutationOperator : new BitFlipMutationOperator(this.random);
         this.crossoverOperator = builder.crossoverOperator != null ? builder.crossoverOperator : new ProbabilisticCrossoverOperator(
             new CrossoverOperator[] {
-                new OnePointCrossoverOperator(this.random),
-                new TwoPointCrossoverOperator(this.random),
-                new UniformCrossoverOperator(this.random),
+                new OnePointCrossoverOperator(),
+                new TwoPointCrossoverOperator(),
+                new UniformCrossoverOperator(),
                 new HUXCrossoverOperator(this.random),
                 new SegmentCrossoverOperator(this.random, 5),
-                new ShuffleExchangeCrossoverOperator(this.random),
+                new ShuffleExchangeCrossoverOperator(),
                 new SetBasedCrossoverOperator(this.random, waveSizeLB, waveSizeUB, orders, aisles),
                 new GreedyHeuristicCrossoverOperator(this.random, waveSizeLB, waveSizeUB, orders, aisles)
             },
             new double[] {0.13, 0.13, 0.13, 0.13, 0.12, 0.12, 0.12, 0.12},
             this.random
         );
+        this.rateControlStrategy = builder.rateControlStrategy;
     }
 
     /**
@@ -250,6 +315,7 @@ public class GeneticAlgorithm {
         private long maxRuntimeMillis = 60000;
         private MutationOperator mutationOperator = null;
         private CrossoverOperator crossoverOperator = null;
+        private RateControlStrategy rateControlStrategy = null;
 
         public Builder(List<Map<Integer, Integer>> orders, List<Map<Integer, Integer>> aisles, int numItems, int waveSizeLB, int waveSizeUB) {
             this.orders = orders;
@@ -295,6 +361,10 @@ public class GeneticAlgorithm {
             this.crossoverOperator = crossoverOperator;
             return this;
         }
+        public Builder rateControlStrategy(RateControlStrategy rateControlStrategy) {
+            this.rateControlStrategy = rateControlStrategy;
+            return this;
+        }
 
         public GeneticAlgorithm build() {
             return new GeneticAlgorithm(this);
@@ -323,11 +393,66 @@ public class GeneticAlgorithm {
         }
 
         // Completar o resto da população com indivíduos aleatórios
+        // Diversificação proposital: gerar indivíduos com perfis distintos
+        int toGen = populationSize - population.size();
+        int group = Math.max(1, toGen / 3);
+        // 1) Poucos pedidos (indivíduos leves)
+        for (int i = 0; i < group && population.size() < populationSize; i++) {
+            Individual ind = new Individual(orders.size(), random);
+            // zera genes
+            Arrays.fill(ind.getGenes(), false);
+            // adiciona poucas ordens
+            int k = 1 + random.nextInt(3);
+            for (int j = 0; j < k; j++) {
+                ind.setGene(random.nextInt(orders.size()), true);
+            }
+            repairIndividual(ind);
+            evaluateIndividual(ind);
+            population.add(ind);
+        }
+        // 2) Muitos pedidos (indivíduos pesados)
+        for (int i = 0; i < group && population.size() < populationSize; i++) {
+            Individual ind = new Individual(orders.size(), random);
+            Arrays.fill(ind.getGenes(), false);
+            int total = 0;
+            List<Integer> candidates = new ArrayList<>();
+            for (int o = 0; o < orders.size(); o++) candidates.add(o);
+            Collections.shuffle(candidates, random);
+            for (int orderId : candidates) {
+                int units = orders.get(orderId).values().stream().mapToInt(Integer::intValue).sum();
+                if (total + units <= waveSizeUB) {
+                    ind.setGene(orderId, true);
+                    total += units;
+                }
+                if (total >= waveSizeLB) break;
+            }
+            repairIndividual(ind);
+            evaluateIndividual(ind);
+            population.add(ind);
+        }
+        // 3) Foco em corredores (cada indivíduo foca em um corredor aleatório)
+        for (int i = 0; i < group && population.size() < populationSize; i++) {
+            int aisle = random.nextInt(aisles.size());
+            Individual ind = new Individual(orders.size(), random);
+            Arrays.fill(ind.getGenes(), false);
+            for (int o = 0; o < orders.size(); o++) {
+                for (Integer item : orders.get(o).keySet()) {
+                    if (aisles.get(aisle).containsKey(item)) {
+                        ind.setGene(o, true);
+                        break;
+                    }
+                }
+            }
+            repairIndividual(ind);
+            evaluateIndividual(ind);
+            population.add(ind);
+        }
+        // Preencher restantes aleatoriamente
         while (population.size() < populationSize) {
-            Individual individual = new Individual(orders.size(), random);
-            repairIndividual(individual); // Repara para garantir viabilidade
-            evaluateIndividual(individual);
-            population.add(individual);
+            Individual ind = new Individual(orders.size(), random);
+            repairIndividual(ind);
+            evaluateIndividual(ind);
+            population.add(ind);
         }
 
         // Ordena população por fitness
@@ -346,10 +471,13 @@ public class GeneticAlgorithm {
      * @return A melhor solução encontrada
      */
     public ChallengeSolution evolve(StopWatch stopWatch) {
+        // inicializa temperatura
+        this.temperature = 1.0;
         int generation = 0;
         generationsWithoutImprovement = 0;
         double lastBestFitness = 0.0;
         mutationRateAdaptativa = mutationRateInicial; // inicia com valor inicial
+        lastAutomatonFitness = bestFitness;
 
         System.out.println("Iniciando evolução genética...");
 
@@ -357,26 +485,57 @@ public class GeneticAlgorithm {
                generationsWithoutImprovement < noImprovementLimit &&
                (stopWatch.getTime(TimeUnit.MILLISECONDS) < maxRuntimeMillis)) {
 
-            // --- Controle adaptativo: ajusta mutationRate conforme melhoria ---
-            double improvement = (bestFitness > 0) ? (bestFitness - lastBestFitness) / bestFitness : 0.0;
-            if (improvement < improvementThresholdDown) {
-                mutationRateAdaptativa = Math.min(mutationRateAdaptativa + mutationStep, mutationRateMax);
-            } else if (improvement > improvementThresholdUp) {
-                mutationRateAdaptativa = Math.max(mutationRateAdaptativa - mutationStep, mutationRateMin);
-            }
+            double diversity = calculateDiversity();
+            double avgImprovement = calculateAvgImprovement(lastBestFitness);
+            RateControlContext context = new RateControlContext(avgImprovement, diversity, lastBestFitness);
+            double[] rates = rateControlStrategy.getRates(context);
+            mutationRateAdaptativa = rates[0];
+            double crossoverRateFuzzy = rates[1];
             lastBestFitness = bestFitness;
-            // --------------------------------------------------------------
 
-            List<Individual> offspring = generateOffspring();
+            // esfria temperatura
+            temperature *= coolingRate;
 
-            offspring.parallelStream().forEach(child -> {
-                repairIndividual(child);
-                evaluateIndividual(child);
-            });
+            List<Individual> offspring = generateOffspringFuzzy(crossoverRateFuzzy);
 
-            // Combina pais e filhos
+            // Avaliação em paralelo usando ExecutorService para maior controle
+            ExecutorService executor = Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors());
+            List<Callable<Void>> tasks = new ArrayList<>();
+            for (Individual child : offspring) {
+                tasks.add(() -> {
+                    repairIndividual(child);
+                    evaluateIndividual(child);
+                    return null;
+                });
+            }
+            try {
+                List<Future<Void>> futures = executor.invokeAll(tasks);
+                for (Future<Void> future : futures) {
+                    try {
+                        future.get();
+                    } catch (ExecutionException e) {
+                        // Tratar exceção individual de tarefa
+                        e.getCause().printStackTrace();
+                    }
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            } finally {
+                executor.shutdown();
+            }
+
+            // Simulated Annealing: aceita filhos piores com probabilidade
+            List<Individual> accepted = new ArrayList<>();
+            for (Individual child : offspring) {
+                Individual worst = population.get(populationSize - 1);
+                double delta = child.getFitness() - worst.getFitness();
+                if (delta >= 0 || random.nextDouble() < Math.exp(delta / temperature)) {
+                    accepted.add(child);
+                }
+            }
+            // Combina pais e filhos aceitos
             List<Individual> combinedPopulation = new ArrayList<>(population);
-            combinedPopulation.addAll(offspring);
+            combinedPopulation.addAll(accepted);
 
             // Ordena a população combinada por fitness
             Collections.sort(combinedPopulation);
@@ -402,14 +561,48 @@ public class GeneticAlgorithm {
                 generationsWithoutImprovement++;
             }
 
+            // Hiper-mutação em caso de estagnação
+            if (generationsWithoutImprovement >= noImprovementLimit) {
+                for (int i = elitismCount; i < populationSize; i++) {
+                    Individual ind = population.get(i);
+                    for (int g = 0; g < ind.getGenes().length; g++) {
+                        if (random.nextDouble() < HIGH_MUTATION_RATE) {
+                            // inverte estado do gene manualmente
+                            boolean current = ind.getGene(g);
+                            ind.setGene(g, !current);
+                        }
+                    }
+                    evaluateIndividual(ind);
+                }
+                generationsWithoutImprovement = 0;
+                System.out.println("[Hiper-mutação] aplicada após estagnação de " + noImprovementLimit + " gerações.");
+            }
+
+            // Atualiza probabilidades dos operadores a cada PROB_UPDATE_INTERVAL gerações
+            if (generation % PROB_UPDATE_INTERVAL == 0) {
+                if (crossoverOperator instanceof org.sbpo2025.challenge.geneticAlgorithm.crossover.ProbabilisticCrossoverOperator) {
+                    ((org.sbpo2025.challenge.geneticAlgorithm.crossover.ProbabilisticCrossoverOperator) crossoverOperator).updateProbabilities();
+                }
+                if (mutationOperator instanceof org.sbpo2025.challenge.geneticAlgorithm.mutation.ProbabilisticMutationOperator) {
+                    ((org.sbpo2025.challenge.geneticAlgorithm.mutation.ProbabilisticMutationOperator) mutationOperator).updateProbabilities();
+                }
+            }
+
+            // --- Learning Automata: recompensa/penalidade ---
+            boolean reward = (bestFitness > lastAutomatonFitness);
+            mutationRateAutomaton.update(reward);
+            crossoverRateAutomaton.update(reward);
+            lastAutomatonFitness = bestFitness;
+            // ------------------------------------------------
+
             generation++;
 
             // Log a cada 10 gerações
             if (generation % 10 == 0) {
                 System.out.println("Geração " + generation +
                                    ": Melhor fitness = " + bestFitness +
-                                   ", Gerações sem melhoria: " + generationsWithoutImprovement +
-                                   ", Tempo: " + stopWatch.getTime(TimeUnit.SECONDS) + "s");
+                                    ", Gerações sem melhoria: " + generationsWithoutImprovement +
+                                    ", Tempo: " + stopWatch.getTime(TimeUnit.SECONDS) + "s");
             }
         }
 
@@ -419,49 +612,126 @@ public class GeneticAlgorithm {
         return bestIndividual.toSolution();
     }
 
-    private List<Individual> generateOffspring() {
+    private List<Individual> generateOffspringFuzzy(double crossoverRateFuzzy) {
         List<Individual> offspring = new ArrayList<>();
         int numOffspring = populationSize - elitismCount;
         while (offspring.size() < numOffspring) {
             Individual parent1 = tournamentSelection();
             Individual parent2 = tournamentSelection();
-            // Média dos genes de crossover dos pais
             double crossoverRateGene = (parent1.getCrossoverRateGene() + parent2.getCrossoverRateGene()) / 2.0;
-            if (random.nextDouble() < crossoverRateGene) {
-                Individual[] children = crossoverOperator.crossover(parent1, parent2);
-                for (Individual child : children) {
-                    // Herdar/mutar genes de parâmetros
-                    double mutGene = (parent1.getMutationRateGene() + parent2.getMutationRateGene()) / 2.0;
-                    // Pequena mutação gaussiana
-                    mutGene += random.nextGaussian() * 0.01;
-                    child.setMutationRateGene(mutGene);
-                    double crossGene = (parent1.getCrossoverRateGene() + parent2.getCrossoverRateGene()) / 2.0;
-                    crossGene += random.nextGaussian() * 0.01;
-                    child.setCrossoverRateGene(crossGene);
-                    // Mutação usando gene do próprio filho
-                    mutationOperator.mutate(child, child.getMutationRateGene());
-                    offspring.add(child);
-                    if (offspring.size() >= numOffspring) break;
+            double crossoverProb = (crossoverRateGene + crossoverRateFuzzy) / 2.0;
+            if (random.nextDouble() < crossoverProb) {
+                if (crossoverOperator instanceof org.sbpo2025.challenge.geneticAlgorithm.crossover.ProbabilisticCrossoverOperator) {
+                    var probCross = (org.sbpo2025.challenge.geneticAlgorithm.crossover.ProbabilisticCrossoverOperator) crossoverOperator;
+                    var result = probCross.crossoverWithOperatorIndex(parent1, parent2);
+                    for (Individual child : result.children) {
+                        double mutGene = (parent1.getMutationRateGene() + parent2.getMutationRateGene()) / 2.0;
+                        mutGene = (mutGene + mutationRateAdaptativa) / 2.0;
+                        mutGene += random.nextGaussian() * 0.01;
+                        child.setMutationRateGene(mutGene);
+                        double crossGene = (parent1.getCrossoverRateGene() + parent2.getCrossoverRateGene()) / 2.0;
+                        crossGene = (crossGene + crossoverRateFuzzy) / 2.0;
+                        crossGene += random.nextGaussian() * 0.01;
+                        child.setCrossoverRateGene(crossGene);
+                        int mutIdx = -1;
+                        if (mutationOperator instanceof org.sbpo2025.challenge.geneticAlgorithm.mutation.ProbabilisticMutationOperator) {
+                            mutIdx = ((org.sbpo2025.challenge.geneticAlgorithm.mutation.ProbabilisticMutationOperator) mutationOperator)
+                                .mutateWithOperatorIndex(child, child.getMutationRateGene());
+                        } else {
+                            mutationOperator.mutate(child, child.getMutationRateGene());
+                        }
+                        offspring.add(child);
+                        if (child.getFitness() > bestFitness) {
+                            probCross.registerSuccess(result.operatorIndex);
+                            if (mutIdx >= 0) {
+                                ((org.sbpo2025.challenge.geneticAlgorithm.mutation.ProbabilisticMutationOperator) mutationOperator)
+                                    .registerSuccess(mutIdx);
+                            }
+                        }
+                        if (offspring.size() >= numOffspring) break;
+                    }
+                } else {
+                    Individual[] children = crossoverOperator.crossover(parent1, parent2);
+                    for (Individual child : children) {
+                        double mutGene = (parent1.getMutationRateGene() + parent2.getMutationRateGene()) / 2.0;
+                        mutGene = (mutGene + mutationRateAdaptativa) / 2.0;
+                        mutGene += random.nextGaussian() * 0.01;
+                        child.setMutationRateGene(mutGene);
+                        double crossGene = (parent1.getCrossoverRateGene() + parent2.getCrossoverRateGene()) / 2.0;
+                        crossGene = (crossGene + crossoverRateFuzzy) / 2.0;
+                        crossGene += random.nextGaussian() * 0.01;
+                        child.setCrossoverRateGene(crossGene);
+                        mutationOperator.mutate(child, child.getMutationRateGene());
+                        offspring.add(child);
+                        if (offspring.size() >= numOffspring) break;
+                    }
                 }
             } else {
                 Individual child1 = parent1.copy();
                 Individual child2 = parent2.copy();
-                // Mutação dos genes de parâmetro mesmo sem crossover
                 double mutGene1 = parent1.getMutationRateGene() + random.nextGaussian() * 0.01;
+                mutGene1 = (mutGene1 + mutationRateAdaptativa) / 2.0;
                 double crossGene1 = parent1.getCrossoverRateGene() + random.nextGaussian() * 0.01;
+                crossGene1 = (crossGene1 + crossoverRateFuzzy) / 2.0;
                 child1.setMutationRateGene(mutGene1);
                 child1.setCrossoverRateGene(crossGene1);
                 double mutGene2 = parent2.getMutationRateGene() + random.nextGaussian() * 0.01;
+                mutGene2 = (mutGene2 + mutationRateAdaptativa) / 2.0;
                 double crossGene2 = parent2.getCrossoverRateGene() + random.nextGaussian() * 0.01;
+                crossGene2 = (crossGene2 + crossoverRateFuzzy) / 2.0;
                 child2.setMutationRateGene(mutGene2);
                 child2.setCrossoverRateGene(crossGene2);
-                mutationOperator.mutate(child1, child1.getMutationRateGene());
-                mutationOperator.mutate(child2, child2.getMutationRateGene());
+                int mutIdx1 = -1, mutIdx2 = -1;
+                if (mutationOperator instanceof org.sbpo2025.challenge.geneticAlgorithm.mutation.ProbabilisticMutationOperator) {
+                    mutIdx1 = ((org.sbpo2025.challenge.geneticAlgorithm.mutation.ProbabilisticMutationOperator) mutationOperator)
+                        .mutateWithOperatorIndex(child1, child1.getMutationRateGene());
+                    mutIdx2 = ((org.sbpo2025.challenge.geneticAlgorithm.mutation.ProbabilisticMutationOperator) mutationOperator)
+                        .mutateWithOperatorIndex(child2, child2.getMutationRateGene());
+                } else {
+                    mutationOperator.mutate(child1, child1.getMutationRateGene());
+                    mutationOperator.mutate(child2, child2.getMutationRateGene());
+                }
                 offspring.add(child1);
                 if (offspring.size() < numOffspring) offspring.add(child2);
+                if (child1.getFitness() > bestFitness && mutIdx1 >= 0) {
+                    ((org.sbpo2025.challenge.geneticAlgorithm.mutation.ProbabilisticMutationOperator) mutationOperator)
+                        .registerSuccess(mutIdx1);
+                }
+                if (child2.getFitness() > bestFitness && mutIdx2 >= 0) {
+                    ((org.sbpo2025.challenge.geneticAlgorithm.mutation.ProbabilisticMutationOperator) mutationOperator)
+                        .registerSuccess(mutIdx2);
+                }
             }
         }
         return offspring;
+    }
+
+    private double calculateDiversity() {
+        int n = population.size();
+        if (n < 2) return 0.0;
+        double diversity = IntStream.range(0, n - 1)
+            .flatMap(i -> IntStream.range(i + 1, n)
+                .map(j -> hammingDistance(population.get(i), population.get(j))))
+            .average()
+            .orElse(0.0) / numItems;
+        return diversity;
+    }
+
+    private int hammingDistance(Individual a, Individual b) {
+        int minLen = Math.min(a.getGenes().length, b.getGenes().length);
+        int dist = 0;
+        for (int i = 0; i < minLen; i++) {
+            if (a.getGene(i) != b.getGene(i)) dist++;
+        }
+        return dist;
+    }
+
+    private double calculateAvgImprovement(double lastBestFitness) {
+        return population.stream()
+            .mapToDouble(ind -> ind.getFitness() - lastBestFitness)
+            .filter(imp -> imp > 0)
+            .average()
+            .orElse(0.0) / (lastBestFitness + 1e-6);
     }
 
     /**
@@ -519,11 +789,13 @@ public class GeneticAlgorithm {
     private Map<Integer, Integer> calculateTotalDemand(Individual individual) {
         Map<Integer, Integer> totalDemand = new HashMap<>();
         for (Integer orderId : individual.getSelectedOrders()) {
-            Map<Integer, Integer> orderItems = orders.get(orderId);
-            for (Map.Entry<Integer, Integer> entry : orderItems.entrySet()) {
-                int itemId = entry.getKey();
-                int units = entry.getValue();
-                totalDemand.put(itemId, totalDemand.getOrDefault(itemId, 0) + units);
+            if (orderId < orders.size()) {
+                Map<Integer, Integer> orderItems = orders.get(orderId);
+                for (Map.Entry<Integer, Integer> entry : orderItems.entrySet()) {
+                    int itemId = entry.getKey();
+                    int units = entry.getValue();
+                    totalDemand.put(itemId, totalDemand.getOrDefault(itemId, 0) + units);
+                }
             }
         }
         return totalDemand;
@@ -611,42 +883,36 @@ public class GeneticAlgorithm {
 
     /**
      * Repara um indivíduo para tentar torná-lo viável
+     * Estratégia sorteada a cada chamada para aumentar diversidade.
      * @param individual O indivíduo a ser reparado
      */
     private void repairIndividual(Individual individual) {
-        // Obtém os pedidos selecionados
+        int strategy = random.nextInt(3); // 0: aleatória, 1: maior itens únicos, 2: menor contribuição
         Set<Integer> selectedOrders = individual.getSelectedOrders();
-
-        // Se não há pedidos selecionados, adiciona alguns aleatoriamente
         if (selectedOrders.isEmpty()) {
-            for (int i = 0; i < 5; i++) { // Adiciona 5 pedidos aleatórios
+            for (int i = 0; i < 5; i++) {
                 int randomOrder = random.nextInt(orders.size());
-                individual.setGene(randomOrder, true);
+                if (randomOrder < orders.size()) {
+                    individual.setGene(randomOrder, true);
+                }
             }
             selectedOrders = individual.getSelectedOrders();
         }
-
-        // 1. Calcular total de unidades nos pedidos selecionados
         Map<Integer, Integer> totalDemand = new HashMap<>();
         int totalUnits = 0;
-
         for (Integer orderId : selectedOrders) {
-            Map<Integer, Integer> orderItems = orders.get(orderId);
-
-            for (Map.Entry<Integer, Integer> entry : orderItems.entrySet()) {
-                int itemId = entry.getKey();
-                int units = entry.getValue();
-
-                totalDemand.put(itemId, totalDemand.getOrDefault(itemId, 0) + units);
-                totalUnits += units;
+            if (orderId < orders.size()) {
+                Map<Integer, Integer> orderItems = orders.get(orderId);
+                for (Map.Entry<Integer, Integer> entry : orderItems.entrySet()) {
+                    int itemId = entry.getKey();
+                    int units = entry.getValue();
+                    totalDemand.put(itemId, totalDemand.getOrDefault(itemId, 0) + units);
+                    totalUnits += units;
+                }
             }
         }
-
-        // 2. Reparar se o total de unidades está fora dos limites
         List<Integer> ordersList = new ArrayList<>(selectedOrders);
-        Collections.shuffle(ordersList, random); // Embaralha para aleatoriedade na reparação
-
-        // 2.1. Se estiver abaixo do limite inferior, adiciona pedidos aleatoriamente
+        Collections.shuffle(ordersList, random);
         if (totalUnits < waveSizeLB) {
             List<Integer> candidateOrders = new ArrayList<>();
             for (int i = 0; i < orders.size(); i++) {
@@ -654,59 +920,75 @@ public class GeneticAlgorithm {
                     candidateOrders.add(i);
                 }
             }
-            Collections.shuffle(candidateOrders, random);
-
+            // Estratégias para adicionar pedidos
+            if (strategy == 1) {
+                // Ordena por maior número de itens únicos
+                candidateOrders.sort((a, b) -> Integer.compare(
+                    orders.get(b).keySet().size(),
+                    orders.get(a).keySet().size()
+                ));
+            } else if (strategy == 2) {
+                // Ordena por maior número de unidades
+                candidateOrders.sort((a, b) -> Integer.compare(
+                    orders.get(b).values().stream().mapToInt(Integer::intValue).sum(),
+                    orders.get(a).values().stream().mapToInt(Integer::intValue).sum()
+                ));
+            } else {
+                Collections.shuffle(candidateOrders, random);
+            }
             for (Integer orderId : candidateOrders) {
-                Map<Integer, Integer> orderItems = orders.get(orderId);
-                int orderUnits = orderItems.values().stream().mapToInt(Integer::intValue).sum();
-
-                // Adiciona o pedido se não ultrapassar o limite superior
-                if (totalUnits + orderUnits <= waveSizeUB) {
-                    individual.setGene(orderId, true);
-                    totalUnits += orderUnits;
-
-                    // Atualiza a demanda total
+                if (orderId < orders.size()) {
+                    Map<Integer, Integer> orderItems = orders.get(orderId);
+                    int orderUnits = orderItems.values().stream().mapToInt(Integer::intValue).sum();
+                    if (totalUnits + orderUnits <= waveSizeUB) {
+                        individual.setGene(orderId, true);
+                        totalUnits += orderUnits;
+                        for (Map.Entry<Integer, Integer> entry : orderItems.entrySet()) {
+                            int itemId = entry.getKey();
+                            int units = entry.getValue();
+                            totalDemand.put(itemId, totalDemand.getOrDefault(itemId, 0) + units);
+                        }
+                        if (totalUnits >= waveSizeLB) {
+                            break;
+                        }
+                    }
+                }
+            }
+        } else if (totalUnits > waveSizeUB) {
+            // Estratégias para remover pedidos
+            if (strategy == 1) {
+                // Remove pedidos de menor número de itens únicos primeiro
+                ordersList.sort(Comparator.comparingInt(a -> orders.get(a).keySet().size()));
+            } else if (strategy == 2) {
+                // Remove pedidos de menor número de unidades primeiro
+                ordersList.sort(Comparator.comparingInt(a -> orders.get(a).values().stream().mapToInt(Integer::intValue).sum()));
+            } else {
+                Collections.shuffle(ordersList, random);
+            }
+            for (Integer orderId : ordersList) {
+                if (orderId < orders.size()) {
+                    Map<Integer, Integer> orderItems = orders.get(orderId);
+                    int orderUnits = orderItems.values().stream().mapToInt(Integer::intValue).sum();
+                    individual.setGene(orderId, false);
+                    totalUnits -= orderUnits;
                     for (Map.Entry<Integer, Integer> entry : orderItems.entrySet()) {
                         int itemId = entry.getKey();
                         int units = entry.getValue();
-                        totalDemand.put(itemId, totalDemand.getOrDefault(itemId, 0) + units);
+                        totalDemand.put(itemId, totalDemand.getOrDefault(itemId, 0) - units);
+                        if (totalDemand.get(itemId) <= 0) {
+                            totalDemand.remove(itemId);
+                        }
                     }
-
-                    // Se já atingiu o limite inferior, para
-                    if (totalUnits >= waveSizeLB) {
+                    if (totalUnits <= waveSizeUB && totalUnits >= waveSizeLB) {
                         break;
                     }
                 }
             }
         }
-        // 2.2. Se estiver acima do limite superior, remove pedidos aleatoriamente
-        else if (totalUnits > waveSizeUB) {
-            for (Integer orderId : ordersList) {
-                Map<Integer, Integer> orderItems = orders.get(orderId);
-                int orderUnits = orderItems.values().stream().mapToInt(Integer::intValue).sum();
-
-                // Remove o pedido
-                individual.setGene(orderId, false);
-                totalUnits -= orderUnits;
-
-                // Atualiza a demanda total
-                for (Map.Entry<Integer, Integer> entry : orderItems.entrySet()) {
-                    int itemId = entry.getKey();
-                    int units = entry.getValue();
-                    totalDemand.put(itemId, totalDemand.getOrDefault(itemId, 0) - units);
-                    if (totalDemand.get(itemId) <= 0) {
-                        totalDemand.remove(itemId);
-                    }
-                }
-
-                // Se já está dentro do limite superior e ainda acima do inferior, para
-                if (totalUnits <= waveSizeUB && totalUnits >= waveSizeLB) {
-                    break;
-                }
-            }
+        // Pequena mutação extra para diversidade
+        if (random.nextDouble() < 0.2) {
+            int g = random.nextInt(individual.getGenes().length);
+            individual.setGene(g, !individual.getGene(g));
         }
-
-        // Se ainda estiver fora dos limites após a reparação, não há muito o que fazer
-        // O indivíduo será avaliado como inviável
     }
 }

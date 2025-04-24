@@ -1,20 +1,16 @@
 package org.sbpo2025.challenge.geneticAlgorithm.crossover;
 
 import org.sbpo2025.challenge.geneticAlgorithm.Individual;
-import java.util.Random;
+import java.util.concurrent.ThreadLocalRandom;
 
 public class TwoPointCrossoverOperator implements CrossoverOperator {
-    private final Random random;
-    public TwoPointCrossoverOperator(Random random) {
-        this.random = random;
-    }
     @Override
     public Individual[] crossover(Individual parent1, Individual parent2) {
-        int numGenes = parent1.getGenes().length;
+        int numGenes = Math.min(parent1.getGenes().length, parent2.getGenes().length);
         boolean[] childGenes1 = new boolean[numGenes];
         boolean[] childGenes2 = new boolean[numGenes];
-        int point1 = random.nextInt(numGenes);
-        int point2 = random.nextInt(numGenes);
+        int point1 = ThreadLocalRandom.current().nextInt(numGenes);
+        int point2 = ThreadLocalRandom.current().nextInt(numGenes);
         if (point1 > point2) {
             int temp = point1;
             point1 = point2;

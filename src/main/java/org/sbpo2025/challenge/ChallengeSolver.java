@@ -9,11 +9,13 @@ import com.google.ortools.sat.LinearExpr;
 import com.google.ortools.sat.LinearExprBuilder;
 import org.apache.commons.lang3.time.StopWatch;
 import org.sbpo2025.challenge.geneticAlgorithm.GeneticAlgorithm;
-import org.sbpo2025.challenge.ChallengeConfig;
+import org.sbpo2025.challenge.geneticAlgorithm.fuzzy.FuzzyRateController;
 
 import java.util.*;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
-import java.util.stream.Collectors;
 
 public class ChallengeSolver {
     private final long MAX_RUNTIME = ChallengeConfig.MAX_RUNTIME_MILLIS; // milliseconds; 10 minutes
@@ -34,7 +36,7 @@ public class ChallengeSolver {
     }
 
     public ChallengeSolution solve(StopWatch stopWatch) {
-        // 1. Primeiro obtém uma solução inicial viável usando CP-SAT
+        // 1. Primeiro obtém solução inicial viável usando CP-SAT
         double initialTimeLimit = ChallengeConfig.INITIAL_CP_SAT_TIME_LIMIT_SECONDS; // limite de tempo para a solução inicial
         ChallengeSolution initialSolution = solveWithCpSat(initialTimeLimit);
 
@@ -45,65 +47,52 @@ public class ChallengeSolver {
             System.out.println("Corredores utilizados: " + initialSolution.aisles().size());
             System.out.println("Função objetivo: " + computeObjectiveFunction(initialSolution));
 
-            // 2. Aplicar Algoritmo Genético para refinar a solução
-            System.out.println("Aplicando Algoritmo Genético para refinamento da solução...");
+            // 2. Aplicar Modelo de Ilhas para diversificação e refinamento
+            System.out.println("Aplicando Modelo de Ilhas para diversificação...");
 
             // Calcula tempo disponível para GA após CP-SAT
             long elapsedTime = stopWatch.getTime(TimeUnit.MILLISECONDS);
             long remainingTime = Math.max(0, MAX_RUNTIME - elapsedTime);
 
-            // Configura e executa o algoritmo genético
-            if (remainingTime > ChallengeConfig.MIN_TIME_FOR_GA_MILLIS) { // Se restam pelo menos 10 segundos
-                // Configurações do GA otimizadas para a instância
-                GeneticAlgorithm.Builder gaBuilder = new GeneticAlgorithm.Builder(
-                    orders,
-                    aisles,
-                    nItems,
-                    waveSizeLB,
-                    waveSizeUB
-                );
-                if (orders.size() > 100 || aisles.size() > 15) {
-                    gaBuilder.populationSize(ChallengeConfig.GA_POPULATION_SIZE_LARGE)
-                            .maxGenerations(ChallengeConfig.GA_MAX_GENERATIONS_LARGE)
-                            .mutationRate(ChallengeConfig.GA_MUTATION_RATE_LARGE);
-                } else {
-                    gaBuilder.populationSize(ChallengeConfig.GA_POPULATION_SIZE_SMALL)
-                            .maxGenerations(ChallengeConfig.GA_MAX_GENERATIONS_SMALL);
-                }
-                gaBuilder.noImprovementLimit(ChallengeConfig.GA_NO_IMPROVEMENT_LIMIT)
-                        .crossoverRate(ChallengeConfig.GA_CROSSOVER_RATE)
+            if (remainingTime > ChallengeConfig.MIN_TIME_FOR_GA_MILLIS) {
+                int K = 4;
+                ExecutorService islandExec = Executors.newFixedThreadPool(K);
+                List<Future<ChallengeSolution>> futures = new ArrayList<>();
+                for (int i = 0; i < K; i++) {
+                    double factor = 1.0 + (i - K/2) * 0.1;
+                    GeneticAlgorithm.Builder builder = new GeneticAlgorithm.Builder(
+                        orders, aisles, nItems, waveSizeLB, waveSizeUB)
+                        .populationSize(ChallengeConfig.GA_POPULATION_SIZE_SMALL)
+                        .maxGenerations(ChallengeConfig.GA_MAX_GENERATIONS_SMALL)
+                        .mutationRate(ChallengeConfig.GA_MUTATION_RATE_LARGE * factor)
+                        .crossoverRate(ChallengeConfig.GA_CROSSOVER_RATE * factor)
                         .elitismCount(ChallengeConfig.GA_ELITISM_COUNT)
-                        .maxRuntimeMillis(remainingTime);
-
-                GeneticAlgorithm geneticAlgorithm = gaBuilder.build();
-                // Inicializa com a solução do CP-SAT
-                geneticAlgorithm.initialize(initialSolution);
-
-                // Executa o algoritmo genético
-                ChallengeSolution gaSolution = geneticAlgorithm.evolve(stopWatch);
-
-                // Se encontrou uma solução viável com o GA
-                if (gaSolution != null && isSolutionFeasible(gaSolution)) {
-                    double gaObjective = computeObjectiveFunction(gaSolution);
-                    double initialObjective = computeObjectiveFunction(initialSolution);
-
-                    System.out.println("Solução final do GA:");
-                    System.out.println("Pedidos selecionados: " + gaSolution.orders().size());
-                    System.out.println("Corredores utilizados: " + gaSolution.aisles().size());
-                    System.out.println("Função objetivo: " + gaObjective);
-
-                    // Compara com a solução inicial
-                    double improvement = ((gaObjective / initialObjective) - 1.0) * 100.0;
-                    System.out.println("Melhoria sobre solução inicial: " + String.format("%.2f", improvement) + "%");
-
-                    // Retorna a melhor solução
-                    return (gaObjective > initialObjective) ? gaSolution : initialSolution;
+                        .maxRuntimeMillis(remainingTime)
+                        .rateControlStrategy(new FuzzyRateController());
+                    GeneticAlgorithm islandGA = builder.build();
+                    islandGA.initialize(initialSolution);
+                    futures.add(islandExec.submit(() -> islandGA.evolve(stopWatch)));
                 }
+                islandExec.shutdown();
+                ChallengeSolution best = initialSolution;
+                double bestFit = computeObjectiveFunction(initialSolution);
+                for (Future<ChallengeSolution> f : futures) {
+                    try {
+                        ChallengeSolution sol = f.get();
+                        double fit = computeObjectiveFunction(sol);
+                        if (fit > bestFit) {
+                            bestFit = fit;
+                            best = sol;
+                        }
+                    } catch (Exception e) {
+                        e.printStackTrace();
+                    }
+                }
+                return best;
             } else {
-                System.out.println("Tempo insuficiente para execução do GA. Usando solução do CP-SAT.");
+                System.out.println("Tempo insuficiente para GA. Usando CP-SAT.");
+                return initialSolution;
             }
-
-            return initialSolution;
         } else {
             System.out.println("Não foi possível encontrar uma solução inicial viável com CP-SAT.");
 
@@ -128,7 +117,8 @@ public class ChallengeSolver {
                         .crossoverRate(ChallengeConfig.GA_CROSSOVER_RATE_NO_INIT)
                         .mutationRate(ChallengeConfig.GA_MUTATION_RATE_NO_INIT)
                         .elitismCount(ChallengeConfig.GA_ELITISM_COUNT_NO_INIT)
-                        .maxRuntimeMillis(remainingTime);
+                        .maxRuntimeMillis(remainingTime)
+                        .rateControlStrategy(new FuzzyRateController());
                 GeneticAlgorithm geneticAlgorithm = gaBuilder.build();
 
                 // Inicializa sem solução prévia
@@ -311,8 +301,25 @@ public class ChallengeSolver {
                 }
             }
 
-            // 3) Função objetivo: maximizar total de unidades coletadas
-            model.maximize(totalUnits);
+            // 3) Função objetivo penalizado: maximizar totalUnits * M - sum y[a]
+            // Calcula M como soma das capacidades de todos os corredores + 1
+            int M = 1;
+            for (Map<Integer, Integer> aisleItems : aisles) {
+                for (int cap : aisleItems.values()) {
+                    M += cap;
+                }
+            }
+            // Constrói expressão obj = totalUnits * M - sum y[a]
+            LinearExprBuilder objBuilder = LinearExpr.newBuilder();
+            for (int o = 0; o < O; o++) {
+                for (Map.Entry<Integer, Integer> entry : orders.get(o).entrySet()) {
+                    objBuilder.addTerm(x[o], entry.getValue() * M);
+                }
+            }
+            for (int a = 0; a < A; a++) {
+                objBuilder.addTerm(y[a], -1);
+            }
+            model.maximize(objBuilder.build());
 
             // 4) Configurar e resolver o modelo
             CpSolver solver = new CpSolver();

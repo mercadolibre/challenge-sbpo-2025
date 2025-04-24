@@ -1,20 +1,16 @@
 package org.sbpo2025.challenge.geneticAlgorithm.crossover;
 
 import org.sbpo2025.challenge.geneticAlgorithm.Individual;
-import java.util.Random;
+import java.util.concurrent.ThreadLocalRandom;
 
 public class UniformCrossoverOperator implements CrossoverOperator {
-    private final Random random;
-    public UniformCrossoverOperator(Random random) {
-        this.random = random;
-    }
     @Override
     public Individual[] crossover(Individual parent1, Individual parent2) {
-        int numGenes = parent1.getGenes().length;
+        int numGenes = Math.min(parent1.getGenes().length, parent2.getGenes().length);
         boolean[] childGenes1 = new boolean[numGenes];
         boolean[] childGenes2 = new boolean[numGenes];
         for (int i = 0; i < numGenes; i++) {
-            if (random.nextBoolean()) {
+            if (ThreadLocalRandom.current().nextBoolean()) {
                 childGenes1[i] = parent1.getGenes()[i];
                 childGenes2[i] = parent2.getGenes()[i];
             } else {

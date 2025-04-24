@@ -1,7 +1,7 @@
 package org.sbpo2025.challenge.geneticAlgorithm.crossover;
 
 import org.sbpo2025.challenge.geneticAlgorithm.Individual;
-import java.util.Random;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -11,22 +11,17 @@ import java.util.List;
  * Embaralha a ordem dos genes antes de aplicar crossover de ponto único, depois reverte a ordem.
  */
 public class ShuffleExchangeCrossoverOperator implements CrossoverOperator {
-    private final Random random;
-
-    public ShuffleExchangeCrossoverOperator(Random random) {
-        this.random = random;
-    }
 
     @Override
     public Individual[] crossover(Individual parent1, Individual parent2) {
         boolean[] genes1 = parent1.getGenes();
         boolean[] genes2 = parent2.getGenes();
-        int numGenes = genes1.length;
+        int numGenes = Math.min(genes1.length, genes2.length);
 
         // Gera uma permutação aleatória dos índices
         List<Integer> indices = new ArrayList<>();
         for (int i = 0; i < numGenes; i++) indices.add(i);
-        Collections.shuffle(indices, random);
+        Collections.shuffle(indices, ThreadLocalRandom.current());
 
         // Embaralha os genes dos pais
         boolean[] shuffled1 = new boolean[numGenes];
@@ -37,7 +32,7 @@ public class ShuffleExchangeCrossoverOperator implements CrossoverOperator {
         }
 
         // Crossover de ponto único
-        int point = 1 + random.nextInt(numGenes - 1);
+        int point = 1 + ThreadLocalRandom.current().nextInt(numGenes - 1);
         boolean[] childShuffled1 = new boolean[numGenes];
         boolean[] childShuffled2 = new boolean[numGenes];
         for (int i = 0; i < point; i++) {

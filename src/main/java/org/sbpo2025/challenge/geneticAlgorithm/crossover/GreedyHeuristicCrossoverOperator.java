@@ -39,42 +39,49 @@ public class GreedyHeuristicCrossoverOperator implements CrossoverOperator {
         Set<Integer> childOrders = new HashSet<>();
         int totalUnits = 0;
         for (Integer orderId : orderList) {
-            int units = getOrderUnits(orderId);
-            if (totalUnits + units > waveSizeUB) continue;
-            childOrders.add(orderId);
-            totalUnits += units;
+            if (orderId < orders.size()) {
+                int units = getOrderUnits(orderId);
+                if (totalUnits + units > waveSizeUB) continue;
+                childOrders.add(orderId);
+                totalUnits += units;
+            }
         }
 
         // Se não atingiu LB, adiciona pedidos aleatórios ou por score heurístico
         if (totalUnits < waveSizeLB) {
             List<Integer> notUsed = new ArrayList<>();
-            for (int i = 0; i < orders.size(); i++) {
-                if (!childOrders.contains(i)) notUsed.add(i);
+            int maxGene = Math.min(Math.min(parent1.getGenes().length, parent2.getGenes().length), orders.size());
+            for (int i = 0; i < maxGene; i++) {
+                if (!childOrders.contains(i) && i < orders.size()) notUsed.add(i);
             }
             // Ordena por score heurístico (valor marginal)
             notUsed.sort((o1, o2) -> Double.compare(marginalValue(o2, childOrders), marginalValue(o1, childOrders)));
             for (Integer orderId : notUsed) {
-                int units = getOrderUnits(orderId);
-                if (totalUnits + units > waveSizeUB) continue;
-                childOrders.add(orderId);
-                totalUnits += units;
-                if (totalUnits >= waveSizeLB) break;
+                if (orderId < orders.size()) {
+                    int units = getOrderUnits(orderId);
+                    if (totalUnits + units > waveSizeUB) continue;
+                    childOrders.add(orderId);
+                    totalUnits += units;
+                    if (totalUnits >= waveSizeLB) break;
+                }
             }
             // Se ainda não atingiu, adiciona aleatórios
             Collections.shuffle(notUsed, random);
             for (Integer orderId : notUsed) {
-                if (childOrders.contains(orderId)) continue;
-                int units = getOrderUnits(orderId);
-                if (totalUnits + units > waveSizeUB) continue;
-                childOrders.add(orderId);
-                totalUnits += units;
-                if (totalUnits >= waveSizeLB) break;
+                if (orderId < orders.size() && !childOrders.contains(orderId)) {
+                    int units = getOrderUnits(orderId);
+                    if (totalUnits + units > waveSizeUB) continue;
+                    childOrders.add(orderId);
+                    totalUnits += units;
+                    if (totalUnits >= waveSizeLB) break;
+                }
             }
         }
 
-        // Monta vetor de genes
-        boolean[] genes = new boolean[orders.size()];
-        for (int i = 0; i < orders.size(); i++) {
+        // Monta vetor de genes com tamanho seguro
+        int geneSize = Math.min(Math.min(parent1.getGenes().length, parent2.getGenes().length), orders.size());
+        boolean[] genes = new boolean[geneSize];
+        for (int i = 0; i < geneSize; i++) {
             genes[i] = childOrders.contains(i);
         }
         return new Individual[] { new Individual(genes) };
@@ -82,9 +89,10 @@ public class GreedyHeuristicCrossoverOperator implements CrossoverOperator {
 
     // Valor marginal: incremento de itens/coletor ao adicionar o pedido
     private double marginalValue(int orderId, Set<Integer> currentOrders) {
+        if (orderId >= orders.size()) return 0.0;
         Set<Integer> items = new HashSet<>();
         for (Integer o : currentOrders) {
-            items.addAll(orders.get(o).keySet());
+            if (o < orders.size()) items.addAll(orders.get(o).keySet());
         }
         Set<Integer> newItems = new HashSet<>(orders.get(orderId).keySet());
         newItems.removeAll(items);
@@ -95,6 +103,7 @@ public class GreedyHeuristicCrossoverOperator implements CrossoverOperator {
     }
 
     private int getOrderUnits(int orderId) {
+        if (orderId >= orders.size()) return 0;
         Map<Integer, Integer> orderItems = orders.get(orderId);
         return orderItems.values().stream().mapToInt(Integer::intValue).sum();
     }

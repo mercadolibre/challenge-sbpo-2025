@@ -21,9 +21,15 @@ public class HUXCrossoverOperator implements CrossoverOperator {
     public Individual[] crossover(Individual parent1, Individual parent2) {
         boolean[] genes1 = parent1.getGenes();
         boolean[] genes2 = parent2.getGenes();
-        int numGenes = genes1.length;
-        boolean[] child1 = genes1.clone();
-        boolean[] child2 = genes2.clone();
+        int numGenes = Math.min(genes1.length, genes2.length); // usa o menor tamanho
+        boolean[] child1 = new boolean[numGenes];
+        boolean[] child2 = new boolean[numGenes];
+
+        // Copia os genes até numGenes
+        for (int i = 0; i < numGenes; i++) {
+            child1[i] = genes1[i];
+            child2[i] = genes2[i];
+        }
 
         // Identifica posições onde os genes diferem
         List<Integer> diffIndices = new ArrayList<>();
