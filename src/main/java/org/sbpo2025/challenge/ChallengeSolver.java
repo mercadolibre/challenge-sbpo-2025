@@ -1,6 +1,8 @@
 package org.sbpo2025.challenge;
 
 import org.apache.commons.lang3.time.StopWatch;
+import org.sbpo2025.challenge.GeneticAlgorithm.GeneticAlgorithmExecutor;
+import org.sbpo2025.challenge.GeneticAlgorithm.GAConfiguration;
 
 import java.util.Arrays;
 import java.util.List;
@@ -28,7 +30,46 @@ public class ChallengeSolver {
 
     public ChallengeSolution solve(StopWatch stopWatch) {
         // Implement your solution here
-        return null;
+
+        // 1. Definir os parâmetros para o Algoritmo Genético
+        // TODO: Estes parâmetros podem ser externalizados ou ajustados conforme necessário.
+        GAConfiguration gaConfig = new GAConfiguration(
+            100, // populationSize
+            200, // numberOfGenerations
+            0.8, // crossoverRate
+            0.01,// mutationRate
+            1000.0,// alphaCoveragePenalty
+            100.0, // betaLBUBPenalty
+            3    // tournamentSize
+        );
+
+        // 2. Criar uma instância do GeneticAlgorithmExecutor
+        GeneticAlgorithmExecutor gaExecutor = new GeneticAlgorithmExecutor(
+            this.orders,
+            this.aisles,
+            this.nItems,
+            this.waveSizeLB,
+            this.waveSizeUB,
+            gaConfig
+        );
+
+        // 3. Executar o algoritmo genético
+        // O método run() do executor agora retorna ChallengeSolution
+        ChallengeSolution solution = gaExecutor.run();
+
+        // 4. Retornar a solução encontrada
+        // Se gaExecutor.run() retornar null (ou uma solução "vazia" indicando falha),
+        // ChallengeSolver pode precisar lidar com isso, talvez retornando uma solução default ou vazia.
+        // A implementação atual de convertToChallengeSolution em GeneticAlgorithmExecutor
+        // já retorna uma solução vazia se o melhor indivíduo for nulo.
+        if (solution == null) {
+            // Isso não deve acontecer se convertToChallengeSolution sempre retorna uma instância.
+            // Mas como uma salvaguarda ou se a lógica mudar:
+            System.err.println("GeneticAlgorithmExecutor.run() retornou null. Retornando solução vazia do ChallengeSolver.");
+            return new ChallengeSolution(new java.util.HashSet<>(), new java.util.HashSet<>());
+        }
+
+        return solution;
     }
 
     /*
