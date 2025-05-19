@@ -68,7 +68,7 @@ org.sbpo2025.challenge
 
 ### 2.4 operators/SelectionOperator.java (interface)
 
-* Método: `Individual select(List<Individual> population, double[] fitnesses)`.
+* [x] Método: `Individual select(List<Individual> population, double[] fitnesses)`.
 
 ### 2.5 operators/TournamentSelection.java
 

@@ -1,199 +1,88 @@
 package org.sbpo2025.challenge.GeneticAlgorithm.runner;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
-import java.util.Set;
-import java.util.HashSet;
 
 import org.sbpo2025.challenge.ChallengeSolution;
 import org.sbpo2025.challenge.GeneticAlgorithm.config.GAConfiguration;
 import org.sbpo2025.challenge.GeneticAlgorithm.evaluator.FitnessEvaluator;
 import org.sbpo2025.challenge.GeneticAlgorithm.models.Individual;
+import org.sbpo2025.challenge.GeneticAlgorithm.operators.SelectionOperator;
+import org.sbpo2025.challenge.GeneticAlgorithm.operators.CrossoverOperator;
+import org.sbpo2025.challenge.GeneticAlgorithm.operators.MutationOperator;
+import org.sbpo2025.challenge.GeneticAlgorithm.operators.RepairOperator;
+import org.sbpo2025.challenge.GeneticAlgorithm.population.PopulationManager;
+import org.sbpo2025.challenge.GeneticAlgorithm.util.ChallengeSolutionConverter;
 
 public class GeneticAlgorithmExecutor {
-
-    // Dados do problema
-    private final List<Map<Integer, Integer>> orders;
-    private final List<Map<Integer, Integer>> aisles;
-    private final int nItems;
-    private final int waveSizeLB;
-    private final int waveSizeUB;
+    private final PopulationManager populationManager;
+    private final SelectionOperator selectionOperator;
+    private final CrossoverOperator crossoverOperator;
+    private final MutationOperator mutationOperator;
+    private final RepairOperator repairOperator;
+    private List<Individual> population;
+    private final Random random;
     private final int numOrders;
     private final int numAisles;
-
-    // Configuração do GA
     private final GAConfiguration gaConfiguration;
-
-    // Avaliador de Fitness
     private final FitnessEvaluator fitnessEvaluator;
 
-    // População
-    private List<Individual> population;
-
-    // Utilitários
-    private final Random random;
-
     public GeneticAlgorithmExecutor(
-            List<Map<Integer, Integer>> orders,
-            List<Map<Integer, Integer>> aisles,
-            int nItems,
-            int waveSizeLB,
-            int waveSizeUB,
-            GAConfiguration gaConfiguration) {
-        this.orders = orders;
-        this.aisles = aisles;
-        this.nItems = nItems;
-        this.waveSizeLB = waveSizeLB;
-        this.waveSizeUB = waveSizeUB;
-        this.numOrders = orders.size();
-        this.numAisles = aisles.size();
-
+            PopulationManager populationManager,
+            SelectionOperator selectionOperator,
+            CrossoverOperator crossoverOperator,
+            MutationOperator mutationOperator,
+            RepairOperator repairOperator,
+            GAConfiguration gaConfiguration,
+            FitnessEvaluator fitnessEvaluator,
+            Random random) {
+        this.populationManager = populationManager;
+        this.selectionOperator = selectionOperator;
+        this.crossoverOperator = crossoverOperator;
+        this.mutationOperator = mutationOperator;
+        this.repairOperator = repairOperator;
         this.gaConfiguration = gaConfiguration;
-        this.fitnessEvaluator = new FitnessEvaluator(orders, aisles, nItems, waveSizeLB, waveSizeUB, gaConfiguration);
-
-        this.population = new ArrayList<>(gaConfiguration.getPopulationSize());
-        this.random = new Random();
+        this.fitnessEvaluator = fitnessEvaluator;
+        this.random = random;
+        this.numOrders = populationManager == null ? 0 : populationManager.initializePopulation().get(0).getOrderGenes().length;
+        this.numAisles = populationManager == null ? 0 : populationManager.initializePopulation().get(0).getAisleGenes().length;
     }
 
     public ChallengeSolution run() {
         evolve();
-        Individual bestIndividual = findBestIndividual();
-        return convertToChallengeSolution(bestIndividual);
+        Individual bestIndividual = populationManager.findBest(population);
+        return ChallengeSolutionConverter.convert(bestIndividual);
     }
 
     private void evolve() {
-        initializePopulation();
-        evaluatePopulation();
-
-        for (int generation = 0; generation < gaConfiguration.getNumberOfGenerations(); generation++) {
-            List<Individual> nextGeneration = new ArrayList<>(gaConfiguration.getPopulationSize());
-
-            while (nextGeneration.size() < gaConfiguration.getPopulationSize()) {
-                Individual parent1 = selectParent();
-                Individual parent2 = selectParent();
-
-                Individual offspring1, offspring2;
-
+        population = populationManager.initializePopulation();
+        int popSize = gaConfiguration.getPopulationSize();
+        int generations = gaConfiguration.getNumberOfGenerations();
+        for (int generation = 0; generation < generations; generation++) {
+            List<Individual> offspring = new java.util.ArrayList<>(popSize);
+            double[] fitnesses = new double[population.size()];
+            for (int i = 0; i < population.size(); i++) {
+                fitnesses[i] = population.get(i).getFitness();
+            }
+            while (offspring.size() < popSize) {
+                Individual parent1 = selectionOperator.select(population, fitnesses);
+                Individual parent2 = selectionOperator.select(population, fitnesses);
+                Individual[] children;
                 if (random.nextDouble() < gaConfiguration.getCrossoverRate()) {
-                    Individual[] children = crossover(parent1, parent2);
-                    offspring1 = children[0];
-                    offspring2 = children[1];
+                    children = crossoverOperator.crossover(parent1, parent2);
                 } else {
-                    offspring1 = parent1.clone();
-                    offspring2 = parent2.clone();
+                    children = new Individual[]{parent1.clone(), parent2.clone()};
                 }
-
-                mutate(offspring1);
-                mutate(offspring2);
-
-                repair(offspring1);
-                repair(offspring2);
-
-                this.fitnessEvaluator.calculateFitness(offspring1);
-                this.fitnessEvaluator.calculateFitness(offspring2);
-
-                nextGeneration.add(offspring1);
-                if (nextGeneration.size() < gaConfiguration.getPopulationSize()) {
-                    nextGeneration.add(offspring2);
+                for (Individual child : children) {
+                    mutationOperator.mutate(child);
+                    repairOperator.repair(child, populationManager.ordersData, populationManager.aislesData, populationManager.waveSizeLB, populationManager.waveSizeUB, populationManager.nItems);
+                    fitnessEvaluator.evaluate(child, populationManager.ordersData, populationManager.aislesData, populationManager.waveSizeLB, populationManager.waveSizeUB);
+                    offspring.add(child);
+                    if (offspring.size() >= popSize) break;
                 }
             }
-            population = nextGeneration;
-            // logGenerationProgress(generation);
+            population = populationManager.selectNextGeneration(population, offspring);
         }
-    }
-
-    private void initializePopulation() {
-        for (int i = 0; i < gaConfiguration.getPopulationSize(); i++) {
-            Individual individual = new Individual(numOrders, numAisles);
-            // TODO: Implementar lógica da Seção 3: População Inicial
-            this.fitnessEvaluator.calculateFitness(individual);
-            population.add(individual);
-        }
-    }
-
-    private void evaluatePopulation() {
-        for (Individual individual : population) {
-            this.fitnessEvaluator.calculateFitness(individual);
-        }
-    }
-
-    private Individual selectParent() {
-        // TODO: Implementar seleção por torneio (usando gaConfiguration.getTournamentSize())
-        if (population.isEmpty()) {
-            throw new IllegalStateException("A população está vazia, não é possível selecionar pais.");
-        }
-        return population.get(random.nextInt(gaConfiguration.getPopulationSize())).clone();
-    }
-
-    private Individual[] crossover(Individual parent1, Individual parent2) {
-        Individual offspring1 = parent1.clone();
-        Individual offspring2 = parent2.clone();
-
-        for (int i = 0; i < numOrders; i++) {
-            if (random.nextDouble() < 0.5) {
-                offspring1.getOrderGenes()[i] = parent2.getOrderGenes()[i];
-                offspring2.getOrderGenes()[i] = parent1.getOrderGenes()[i];
-            }
-        }
-        for (int i = 0; i < numAisles; i++) {
-            if (random.nextDouble() < 0.5) {
-                offspring1.getAisleGenes()[i] = parent2.getAisleGenes()[i];
-                offspring2.getAisleGenes()[i] = parent1.getAisleGenes()[i];
-            }
-        }
-        return new Individual[]{offspring1, offspring2};
-    }
-
-    private void mutate(Individual individual) {
-        for (int i = 0; i < numOrders; i++) {
-            if (random.nextDouble() < gaConfiguration.getMutationRate()) {
-                boolean[] genes = individual.getOrderGenes();
-                genes[i] = !genes[i];
-                individual.setOrderGenes(genes);
-            }
-        }
-        for (int i = 0; i < numAisles; i++) {
-            if (random.nextDouble() < gaConfiguration.getMutationRate()) {
-                boolean[] genes = individual.getAisleGenes();
-                genes[i] = !genes[i];
-                individual.setAisleGenes(genes);
-            }
-        }
-    }
-
-    private void repair(Individual individual) {
-        // TODO: Implementar lógica da Seção 5: Repair
-    }
-
-    private Individual findBestIndividual() {
-        if (population.isEmpty()) return null;
-        Individual best = population.get(0);
-        for (int i = 1; i < population.size(); i++) {
-            if (population.get(i).getFitness() > best.getFitness()) {
-                best = population.get(i);
-            }
-        }
-        return best != null ? best.clone() : null;
-    }
-
-    private ChallengeSolution convertToChallengeSolution(Individual individual) {
-        if (individual == null) {
-            System.err.println("Tentativa de converter um Individual nulo para ChallengeSolution. Retornando solução vazia.");
-            return new ChallengeSolution(new HashSet<>(), new HashSet<>());
-        }
-        Set<Integer> selectedOrders = new HashSet<>();
-        for(int i=0; i<individual.getOrderGenes().length; i++) {
-            if(individual.getOrderGenes()[i]) selectedOrders.add(i);
-        }
-        Set<Integer> visitedAisles = new HashSet<>();
-        for(int i=0; i<individual.getAisleGenes().length; i++) {
-            if(individual.getAisleGenes()[i]) visitedAisles.add(i);
-        }
-        if (selectedOrders.isEmpty() && visitedAisles.isEmpty()) {
-             System.err.println("Atenção: Convertendo Individual para ChallengeSolution resultou em pedidos e corredores vazios.");
-        }
-        return new ChallengeSolution(selectedOrders, visitedAisles);
     }
 }

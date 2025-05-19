@@ -34,32 +34,50 @@ public class FitnessEvaluator {
                            List<Map<Integer, Integer>> aisles,
                            int LB,
                            int UB) {
-        // TODO: Implementar lógica da Seção 2: Função de Fitness
-        // Utilizar os parâmetros: individual, orders, aisles, LB, UB
-        // e os campos: alphaCoveragePenalty, betaLBUBPenalty
-
         // 1. Cobertura de pedidos (P_cobertura)
-        //    - Verifique para cada pedido o com xo=1 se todos os itens do pedido
-        //      estão disponíveis nos corredores com ya=1.
-        //    - P_cobertura = alphaCoveragePenalty * (#itens não-cobertos)
+        int uncoveredItems = 0;
+        boolean[] orderGenes = individual.getOrderGenes();
+        boolean[] aisleGenes = individual.getAisleGenes();
+        // Para cada pedido selecionado, verificar se todos os itens estão cobertos
+        for (int o = 0; o < orders.size(); o++) {
+            if (!orderGenes[o]) continue;
+            Map<Integer, Integer> pedido = orders.get(o);
+            for (Integer itemId : pedido.keySet()) {
+                boolean coberto = false;
+                for (int a = 0; a < aisles.size(); a++) {
+                    if (!aisleGenes[a]) continue;
+                    Map<Integer, Integer> corredor = aisles.get(a);
+                    if (corredor.containsKey(itemId) && corredor.get(itemId) > 0) {
+                        coberto = true;
+                        break;
+                    }
+                }
+                if (!coberto) uncoveredItems++;
+            }
+        }
+        double P_cobertura = alphaCoveragePenalty * uncoveredItems;
 
-        // 2. Total de itens coletados (T) e penalidade LB/UB (P_LB/UB)
-        //    - T = Σ_{o: xo=1} Σ_{i∈Io} u_oi  (onde u_oi é a quantidade do item i no pedido o)
-        //    - P_LB/UB = betaLBUBPenalty * max(0, LB-T, T-UB)
+        // 2. Total de itens coletados (T)
+        int T = 0;
+        for (int o = 0; o < orders.size(); o++) {
+            if (!orderGenes[o]) continue;
+            Map<Integer, Integer> pedido = orders.get(o);
+            for (Integer itemId : pedido.keySet()) {
+                T += pedido.get(itemId);
+            }
+        }
+        // Penalidade LB/UB
+        double P_LBUB = 0.0;
+        if (T < LB) P_LBUB = betaLBUBPenalty * (LB - T);
+        else if (T > UB) P_LBUB = betaLBUBPenalty * (T - UB);
 
-        // 3. Objetivo real (f_real)
-        //    - f_real = T / (Σ_a y_a)  (evitar divisão por zero se Σ_a y_a == 0)
-        //      (Σ_a y_a é o número de corredores selecionados no individual)
+        // 3. Razão itens/corredores
+        int nAislesSelected = 0;
+        for (boolean b : aisleGenes) if (b) nAislesSelected++;
+        double f_real = nAislesSelected > 0 ? ((double) T) / nAislesSelected : 0.0;
 
-        // 4. Fitness final (F)
-        //    - F = f_real - P_cobertura - P_LB/UB
-
-        // Placeholder - deve ser substituído pela lógica real
-        double fitness = 0.0;
-
-        // Atualiza o fitness no objeto Individual também
-        // Esta linha pode ser responsabilidade do chamador, dependendo do design.
-        // Por enquanto, mantemos aqui para consistência com a versão anterior.
+        // 4. Fitness final
+        double fitness = f_real - P_cobertura - P_LBUB;
         individual.setFitness(fitness);
         return fitness;
     }

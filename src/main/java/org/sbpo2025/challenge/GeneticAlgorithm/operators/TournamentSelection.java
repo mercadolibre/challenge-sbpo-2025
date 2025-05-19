@@ -16,22 +16,20 @@ public class TournamentSelection implements SelectionOperator {
     }
 
     @Override
-    public Individual select(List<Individual> population) {
-        // TODO: Implementar Tournament Selection (k é gaConfiguration.getTournamentSize())
-        // Exemplo simples: selecionar o primeiro (placeholder)
-        if (population.isEmpty()) return null;
-
-        List<Individual> tournamentContestants = new ArrayList<>();
-        for (int i = 0; i < gaConfiguration.getTournamentSize(); i++) {
-            tournamentContestants.add(population.get(random.nextInt(population.size())));
+    public Individual select(List<Individual> population, double[] fitnesses) {
+        if (population.isEmpty() || fitnesses == null || fitnesses.length != population.size()) return null;
+        int k = gaConfiguration.getTournamentSize();
+        List<Integer> indices = new ArrayList<>();
+        for (int i = 0; i < k; i++) {
+            indices.add(random.nextInt(population.size()));
         }
-
-        Individual bestInTournament = tournamentContestants.get(0);
-        for (int i = 1; i < tournamentContestants.size(); i++) {
-            if (tournamentContestants.get(i).getFitness() > bestInTournament.getFitness()) {
-                bestInTournament = tournamentContestants.get(i);
+        int bestIdx = indices.get(0);
+        for (int i = 1; i < indices.size(); i++) {
+            int idx = indices.get(i);
+            if (fitnesses[idx] > fitnesses[bestIdx]) {
+                bestIdx = idx;
             }
         }
-        return bestInTournament.clone(); // Retornar clone
+        return population.get(bestIdx).clone();
     }
 }

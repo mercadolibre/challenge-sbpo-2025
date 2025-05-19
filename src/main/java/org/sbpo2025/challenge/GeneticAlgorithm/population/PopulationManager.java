@@ -11,11 +11,11 @@ import java.util.Random; // Para decisões aleatórias
 
 public class PopulationManager {
     private final GAConfiguration gaConfiguration;
-    private final List<Map<Integer, Integer>> ordersData;
-    private final List<Map<Integer, Integer>> aislesData;
-    private final int nItems;
-    private final int waveSizeLB;
-    private final int waveSizeUB;
+    public final List<Map<Integer, Integer>> ordersData;
+    public final List<Map<Integer, Integer>> aislesData;
+    public final int nItems;
+    public final int waveSizeLB;
+    public final int waveSizeUB;
     private final int numOrders;
     private final int numAisles;
     private final FitnessEvaluator fitnessEvaluator; // Para calcular fitness após inicialização
@@ -46,16 +46,23 @@ public class PopulationManager {
         List<Individual> population = new ArrayList<>(gaConfiguration.getPopulationSize());
         for (int i = 0; i < gaConfiguration.getPopulationSize(); i++) {
             Individual individual = new Individual(numOrders, numAisles);
-            // TODO: Implementar lógica da Seção 3: População Inicial
-            // 1. Sequência aleatória de pedidos: ...
-            // 2. Gere corredores: ...
-            // 3. Se T<LB, tente adicionar pedidos ...
-
-            // Exemplo de inicialização muito simples (genes aleatórios - NÃO USAR EM PRODUÇÃO)
-            for(int j=0; j<numOrders; j++) individual.getOrderGenes()[j] = random.nextBoolean();
-            for(int j=0; j<numAisles; j++) individual.getAisleGenes()[j] = random.nextBoolean();
-
-            fitnessEvaluator.calculateFitness(individual); // Calcula fitness inicial
+            // Inicialização construtiva simples: seleciona aleatoriamente pedidos e corredores, mas garante pelo menos um de cada
+            boolean algumPedido = false;
+            boolean algumCorredor = false;
+            for(int j=0; j<numOrders; j++) {
+                boolean val = random.nextBoolean();
+                individual.getOrderGenes()[j] = val;
+                if (val) algumPedido = true;
+            }
+            for(int j=0; j<numAisles; j++) {
+                boolean val = random.nextBoolean();
+                individual.getAisleGenes()[j] = val;
+                if (val) algumCorredor = true;
+            }
+            // Garante pelo menos um pedido e um corredor
+            if (!algumPedido && numOrders > 0) individual.getOrderGenes()[0] = true;
+            if (!algumCorredor && numAisles > 0) individual.getAisleGenes()[0] = true;
+            fitnessEvaluator.evaluate(individual, ordersData, aislesData, waveSizeLB, waveSizeUB);
             population.add(individual);
         }
         return population;
@@ -78,23 +85,24 @@ public class PopulationManager {
      * @return A lista de indivíduos para a próxima geração.
      */
     public List<Individual> selectNextGeneration(List<Individual> currentPopulation, List<Individual> offspring) {
-        // TODO: Implementar lógica de seleção da próxima geração, possivelmente com elitismo.
-        // Exemplo simples: substituir toda a população (sem elitismo)
+        // Elitismo: mantém o melhor da geração anterior
         List<Individual> nextGeneration = new ArrayList<>(gaConfiguration.getPopulationSize());
+        if (!currentPopulation.isEmpty()) {
+            Individual elite = findBest(currentPopulation);
+            nextGeneration.add(elite.clone());
+        }
         nextGeneration.addAll(offspring);
-        // Garantir que a população tenha o tamanho correto, preenchendo se necessário ou truncando.
+        // Garante o tamanho correto
         while(nextGeneration.size() < gaConfiguration.getPopulationSize()) {
-             if (!currentPopulation.isEmpty()){
-                nextGeneration.add(currentPopulation.get(random.nextInt(currentPopulation.size())).clone()); // Preenche com aleatórios da pop atual
-             } else {
-                 // Caso extremo: se currentPop está vazia e offspring não é suficiente.
-                 // Criar novos indivíduos aleatórios (ou usar uma melhor estratégia)
-                 Individual randomInd = new Individual(numOrders, numAisles);
-                 for(int j=0; j<numOrders; j++) randomInd.getOrderGenes()[j] = random.nextBoolean();
-                 for(int j=0; j<numAisles; j++) randomInd.getAisleGenes()[j] = random.nextBoolean();
-                 fitnessEvaluator.calculateFitness(randomInd);
-                 nextGeneration.add(randomInd);
-             }
+            if (!currentPopulation.isEmpty()){
+                nextGeneration.add(currentPopulation.get(random.nextInt(currentPopulation.size())).clone());
+            } else {
+                Individual randomInd = new Individual(numOrders, numAisles);
+                for(int j=0; j<numOrders; j++) randomInd.getOrderGenes()[j] = random.nextBoolean();
+                for(int j=0; j<numAisles; j++) randomInd.getAisleGenes()[j] = random.nextBoolean();
+                fitnessEvaluator.evaluate(randomInd, ordersData, aislesData, waveSizeLB, waveSizeUB);
+                nextGeneration.add(randomInd);
+            }
         }
         return nextGeneration.subList(0, gaConfiguration.getPopulationSize());
     }
