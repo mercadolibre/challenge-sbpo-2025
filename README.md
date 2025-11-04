@@ -128,7 +128,9 @@ python checker.py <input_file> <solution_file>
     python run_challenge.py src/main/java/org/sbpo2025/challenge src/main/resources/instances output
     ```
    
-2. Check solution viability:
+2. To check solution viability run the script below:
     ```sh
-    python checker.py src/main/resources/instances/instance_001.txt output/instance_001.txt
+    chmod +x check_all.sh
+    ./check_all
     ```
+    
