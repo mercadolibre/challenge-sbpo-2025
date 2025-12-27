@@ -86,7 +86,7 @@ Spanish and Portuguese versions of the challenge rules and problem description c
 
 - Java 17
 - Maven
-- Python 3.8 or higher
+- Python 3.10 or higher (required due to NumPy 2.x)
 - CPLEX 22.11 (optional)
 - OR-Tools 9.11 (optional)
 
